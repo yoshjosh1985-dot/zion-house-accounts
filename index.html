@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HouseBank | Mobile-Ready Ledger</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Firebase Compat SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        body { 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            overscroll-behavior-y: contain;
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        @media print { .no-print { display: none !important; } }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // Your Firebase Configuration Integrated
+        const HARDCODED_CONFIG = {
+            apiKey: "AIzaSyA53SpP4BQ3kU325m8PL3-7rY7iUTfp45s",
+            authDomain: "home-accounting-2463d.firebaseapp.com",
+            projectId: "home-accounting-2463d",
+            storageBucket: "home-accounting-2463d.firebasestorage.app",
+            messagingSenderId: "645556460544",
+            appId: "1:645556460544:web:f7d822278af64654918ce5",
+            measurementId: "G-WBGRYK26W5"
+        };
+
+        const getInjectedConfig = () => {
+            if (HARDCODED_CONFIG) return HARDCODED_CONFIG;
+            try {
+                return typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+            } catch (e) {
+                return null;
+            }
+        };
+
+        const config = getInjectedConfig();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'home-accounting-2463d';
+        
+        if (config) {
+            firebase.initializeApp(config);
+        }
+
+        const CATEGORIES = ['Groceries', 'Utilities', 'Rent/Mortgage', 'Transport', 'Entertainment', 'Healthcare', 'Education', 'Miscellaneous'];
+
+        const App = () => {
+            const [user, setUser] = React.useState(null);
+            const [view, setView] = React.useState('dashboard');
+            const [transactions, setTransactions] = React.useState([]);
+            const [deposits, setDeposits] = React.useState([]);
+            const [activeModal, setActiveModal] = React.useState(null);
+            const [selectedReceipt, setSelectedReceipt] = React.useState(null);
+            const [loading, setLoading] = React.useState(true);
+            const [error, setError] = React.useState(null);
+            
+            // Report States
+            const [reportRange, setReportRange] = React.useState('monthly');
+            const [customStart, setCustomStart] = React.useState('');
+            const [customEnd, setCustomEnd] = React.useState('');
+
+            const [newEntry, setNewEntry] = React.useState({
+                date: new Date().toISOString().split('T')[0],
+                description: '', amount: '', category: 'Groceries', receipt: null, receiptName: ''
+            });
+
+            const [newDeposit, setNewDeposit] = React.useState({
+                date: new Date().toISOString().split('T')[0], description: 'Weekly Credit', amount: ''
+            });
+
+            React.useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        const auth = firebase.auth();
+                        await auth.signInAnonymously();
+                    } catch (e) { 
+                        console.error("Auth failed", e);
+                        setError("Database access denied. Please ensure Anonymous Auth is enabled in Firebase.");
+                        setLoading(false);
+                    }
+                };
+
+                initAuth();
+                const unsubscribe = firebase.auth().onAuthStateChanged((u) => {
+                    setUser(u);
+                    setLoading(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            React.useEffect(() => {
+                if (!user) return;
+                const db = firebase.firestore();
+                // Standardizing collection paths
+                const collectionPath = `artifacts/${appId}/public/data`;
+                
+                const unsubT = db.collection(`${collectionPath}/transactions`).onSnapshot((s) => {
+                    setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
+                }, (err) => {
+                    console.error("Firestore error:", err);
+                    setError("Database error. Ensure Firestore rules are set to Test Mode.");
+                });
+                
+                const unsubD = db.collection(`${collectionPath}/deposits`).onSnapshot((s) => {
+                    setDeposits(s.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
+                }, (err) => console.error("Firestore error:", err));
+                
+                return () => { unsubT(); unsubD(); };
+            }, [user]);
+
+            const stats = React.useMemo(() => {
+                const now = new Date();
+                const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - 7);
+                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                const getSum = (list) => list.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+
+                const totalEx = getSum(transactions);
+                const totalDep = getSum(deposits);
+                const wEx = getSum(transactions.filter(t => new Date(t.date) >= startOfWeek));
+                const wIn = getSum(deposits.filter(d => new Date(d.date) >= startOfWeek));
+                const mEx = getSum(transactions.filter(t => new Date(t.date) >= startOfMonth));
+                const mIn = getSum(deposits.filter(d => new Date(d.date) >= startOfMonth));
+                const cats = transactions.reduce((a, c) => { a[c.category] = (a[c.category] || 0) + (Number(c.amount) || 0); return a; }, {});
+
+                return { balance: totalDep - totalEx, weeklyRemaining: wIn - wEx, monthlyRemaining: mIn - mEx, weeklyExpenses: wEx, monthlyExpenses: mEx, cats, totalEx };
+            }, [transactions, deposits]);
+
+            const submitEx = async (e) => {
+                e.preventDefault();
+                const db = firebase.firestore();
+                await db.collection(`artifacts/${appId}/public/data/transactions`).add({
+                    ...newEntry, amount: parseFloat(newEntry.amount), userId: user.uid, ts: Date.now()
+                });
+                setActiveModal(null);
+                setNewEntry({ date: new Date().toISOString().split('T')[0], description: '', amount: '', category: 'Groceries', receipt: null, receiptName: '' });
+            };
+
+            const submitDep = async (e) => {
+                e.preventDefault();
+                const db = firebase.firestore();
+                await db.collection(`artifacts/${appId}/public/data/deposits`).add({
+                    ...newDeposit, amount: parseFloat(newDeposit.amount), userId: user.uid, ts: Date.now()
+                });
+                setActiveModal(null);
+                setNewDeposit({ date: new Date().toISOString().split('T')[0], description: 'Weekly Credit', amount: '' });
+            };
+
+            const generatePDF = () => {
+                let start, end;
+                const now = new Date();
+                if (reportRange === 'weekly') { start = new Date(); start.setDate(now.getDate() - 7); end = now; }
+                else if (reportRange === 'monthly') { start = new Date(now.getFullYear(), now.getMonth(), 1); end = now; }
+                else { start = new Date(customStart); end = new Date(customEnd); }
+
+                const filteredEx = transactions.filter(t => new Date(t.date) >= start && new Date(t.date) <= end);
+                const filteredDep = deposits.filter(d => new Date(d.date) >= start && new Date(d.date) <= end);
+                const sumEx = filteredEx.reduce((a,c)=>a+c.amount,0);
+                const sumDep = filteredDep.reduce((a,c)=>a+c.amount,0);
+                
+                const printWindow = window.open('', '_blank');
+                printWindow.document.write(`<html><head><title>HouseBank Report</title><style>body { font-family: sans-serif; padding: 20px; color: #1e293b; } .header { border-bottom: 2px solid #4f46e5; margin-bottom: 20px; padding-bottom: 10px; } table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }</style></head><body><div class="header"><h1>HouseBank Report</h1><p>${start.toLocaleDateString()} - ${end.toLocaleDateString()}</p></div><p><strong>Net Balance: $${(sumDep - sumEx).toFixed(2)}</strong></p><table><thead><tr><th>Date</th><th>Desc</th><th>Amt</th></tr></thead><tbody>${filteredEx.map(t=>`<tr><td>${t.date}</td><td>${t.description}</td><td>-$${t.amount.toFixed(2)}</td></tr>`).join('')}${filteredDep.map(d=>`<tr><td>${d.date}</td><td>${d.description}</td><td>+$${d.amount.toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`);
+                printWindow.document.close();
+                printWindow.print();
+            };
+
+            if (loading) return (
+                <div className="h-screen flex flex-col items-center justify-center bg-white p-6">
+                    <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <div className="font-bold text-indigo-600 uppercase tracking-widest text-xs animate-pulse">Establishing Secure Connection...</div>
+                </div>
+            );
+
+            if (error) return (
+                <div className="h-screen flex items-center justify-center p-6 bg-slate-50 text-center">
+                    <div className="bg-white p-10 rounded-[2.5rem] shadow-xl max-w-sm border border-red-100">
+                        <div className="text-red-500 text-4xl mb-4">⚠️</div>
+                        <h2 className="text-xl font-black text-slate-800 mb-2">Sync Error</h2>
+                        <p className="text-slate-500 text-sm mb-6">{error}</p>
+                        <button onClick={() => window.location.reload()} className="px-8 py-3 bg-indigo-600 text-white font-black rounded-2xl shadow-lg">Retry Connection</button>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="flex h-screen overflow-hidden flex-col md:flex-row">
+                    {/* Sidebar */}
+                    <aside className="md:w-72 bg-white border-b md:border-r flex flex-row md:flex-col p-4 md:p-8 justify-between md:justify-start z-10">
+                        <div className="text-xl md:text-2xl font-black text-indigo-600 tracking-tighter italic">HOUSEBANK</div>
+                        <nav className="hidden md:flex flex-col space-y-2 mt-10 flex-1">
+                            <SidebarLink active={view==='dashboard'} label="Dashboard" onClick={()=>setView('dashboard')} />
+                            <SidebarLink active={view==='ledger'} label="Expenses" onClick={()=>setView('ledger')} />
+                            <SidebarLink active={view==='deposits'} label="Credits" onClick={()=>setView('deposits')} />
+                            <div className="pt-8 space-y-2">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-4">Reporting</span>
+                                <button onClick={()=>setActiveModal('report')} className="w-full text-left p-4 rounded-2xl font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-all">PDF Report</button>
+                            </div>
+                        </nav>
+                        <div className="md:mt-auto bg-slate-900 p-3 md:p-6 rounded-xl md:rounded-[2rem] text-white">
+                            <div className="text-[8px] md:text-[10px] text-slate-400 font-black tracking-widest uppercase">Net Balance</div>
+                            <div className="text-sm md:text-3xl font-black">${stats.balance.toFixed(2)}</div>
+                        </div>
+                    </aside>
+
+                    {/* Main Content */}
+                    <main className="flex-1 overflow-y-auto p-4 md:p-12 custom-scrollbar pb-24 md:pb-12 bg-slate-50/50">
+                        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                            <div>
+                                <h2 className="text-2xl md:text-4xl font-black text-slate-800 capitalize tracking-tight">{view}</h2>
+                                <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.2em] md:mt-1">Cloud Synced</p>
+                            </div>
+                            <div className="flex w-full md:w-auto gap-2">
+                                <button onClick={()=>setActiveModal('deposit')} className="flex-1 md:flex-none bg-white text-emerald-600 px-4 md:px-6 py-3 rounded-xl md:rounded-2xl font-black text-xs md:text-sm border shadow-sm">Add Credit</button>
+                                <button onClick={()=>setActiveModal('expense')} className="flex-1 md:flex-none bg-indigo-600 text-white px-4 md:px-6 py-3 rounded-xl md:rounded-2xl font-black text-xs md:text-sm shadow-xl shadow-indigo-100">New Expense</button>
+                            </div>
+                        </header>
+
+                        {view === 'dashboard' ? (
+                            <div className="grid grid-cols-1 gap-6 md:gap-8">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
+                                    <StatCard title="Weekly Remaining" value={stats.weeklyRemaining} sub={`Spent: $${stats.weeklyExpenses.toFixed(2)}`} />
+                                    <StatCard title="Monthly Remaining" value={stats.monthlyRemaining} sub={`Spent: $${stats.monthlyExpenses.toFixed(2)}`} />
+                                </div>
+                                <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border shadow-sm">
+                                    <h3 className="font-black text-lg mb-6 flex items-center">
+                                        <div className="w-2 h-2 bg-indigo-500 rounded-full mr-3"></div>
+                                        Breakdown
+                                    </h3>
+                                    <div className="space-y-6">
+                                        {CATEGORIES.map(c => (
+                                            <div key={c}>
+                                                <div className="flex justify-between font-black text-[10px] text-slate-400 uppercase tracking-widest mb-2">
+                                                    <span>{c}</span>
+                                                    <span className="text-slate-900">${(stats.cats[c]||0).toFixed(2)}</span>
+                                                </div>
+                                                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-indigo-600" style={{width: `${stats.totalEx > 0 ? ((stats.cats[c]||0)/stats.totalEx)*100 : 0}%`}} />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-white rounded-2xl md:rounded-[3rem] border shadow-sm overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left min-w-[500px]">
+                                        <thead>
+                                            <tr className="bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                                <th className="px-6 py-4">Date</th>
+                                                <th className="px-6 py-4">Description</th>
+                                                <th className="px-6 py-4">Amount</th>
+                                                {view==='ledger' && <th className="px-6 py-4">Scan</th>}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {(view==='ledger'?transactions:deposits).map(item => (
+                                                <tr key={item.id} className="hover:bg-slate-50">
+                                                    <td className="px-6 py-4 text-xs font-bold text-slate-400">{item.date}</td>
+                                                    <td className="px-6 py-4 font-black text-slate-800 text-sm">{item.description}</td>
+                                                    <td className={`px-6 py-4 font-black ${view==='deposits'?'text-emerald-500':'text-slate-900'}`}>
+                                                        ${Number(item.amount).toFixed(2)}
+                                                    </td>
+                                                    {view==='ledger' && (
+                                                        <td className="px-6 py-4">
+                                                            {item.receipt ? (
+                                                                <button onClick={()=>setSelectedReceipt(item.receipt)} className="text-indigo-600 font-black text-[10px] uppercase underline">View</button>
+                                                            ) : "-"}
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                            ))}
+                                            {(view === 'ledger' ? transactions : deposits).length === 0 && (
+                                                <tr>
+                                                    <td colSpan="4" className="px-6 py-12 text-center text-slate-400 font-bold italic">No data found in the cloud yet.</td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Mobile Nav Bar */}
+                        <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t flex justify-around p-3 z-50 shadow-2xl">
+                             <MobileNavLink active={view==='dashboard'} label="Dash" onClick={()=>setView('dashboard')} />
+                             <MobileNavLink active={view==='ledger'} label="Exp" onClick={()=>setView('ledger')} />
+                             <MobileNavLink active={view==='deposits'} label="Cred" onClick={()=>setView('deposits')} />
+                             <MobileNavLink active={activeModal==='report'} label="PDF" onClick={()=>setActiveModal('report')} />
+                        </div>
+                    </main>
+
+                    {/* Modals */}
+                    {activeModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end md:items-center justify-center p-4 z-[60]">
+                            <div className="bg-white rounded-t-3xl md:rounded-[3rem] w-full max-w-lg shadow-2xl flex flex-col max-h-[95vh] md:max-h-[90vh] animate-in slide-in-from-bottom duration-300">
+                                <div className="flex justify-between items-center p-6 md:p-8 border-b md:border-0">
+                                    <h3 className="text-2xl font-black text-slate-800 tracking-tight">
+                                        {activeModal === 'expense' ? 'Log Expense' : activeModal === 'deposit' ? 'Add Credit' : 'Generate Report'}
+                                    </h3>
+                                    <button onClick={()=>setActiveModal(null)} className="p-2 text-slate-400 bg-slate-100 rounded-full hover:bg-slate-200">✕</button>
+                                </div>
+                                
+                                <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
+                                    {activeModal === 'report' ? (
+                                        <div className="space-y-6 pb-6">
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {['weekly', 'monthly', 'custom'].map(r => (
+                                                    <button key={r} onClick={()=>setReportRange(r)} className={`p-3 rounded-xl font-black text-[10px] uppercase tracking-widest ${reportRange===r?'bg-indigo-600 text-white shadow-lg':'bg-slate-100 text-slate-500'}`}>{r}</button>
+                                                ))}
+                                            </div>
+                                            {reportRange === 'custom' && (
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <Input label="From" type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)} />
+                                                    <Input label="To" type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} />
+                                                </div>
+                                            )}
+                                            <button onClick={generatePDF} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700">Prepare PDF</button>
+                                        </div>
+                                    ) : (
+                                        <form onSubmit={activeModal === 'expense' ? submitEx : submitDep} className="space-y-5 pb-6">
+                                            <Input label="Date" type="date" required value={activeModal === 'expense' ? newEntry.date : newDeposit.date} onChange={e => activeModal === 'expense' ? setNewEntry({...newEntry, date: e.target.value}) : setNewDeposit({...newDeposit, date: e.target.value})} />
+                                            <Input label="Description" placeholder="Payee / Note" required value={activeModal === 'expense' ? newEntry.description : newDeposit.description} onChange={e => activeModal === 'expense' ? setNewEntry({...newEntry, description: e.target.value}) : setNewDeposit({...newDeposit, description: e.target.value})} />
+                                            
+                                            <div className="space-y-1 text-center py-4 bg-slate-50 rounded-3xl">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount ($)</label>
+                                                <input type="number" step="0.01" required placeholder="0.00" className={`w-full bg-transparent border-0 text-5xl font-black text-center focus:ring-0 ${activeModal==='expense'?'text-slate-800':'text-emerald-600'}`} value={activeModal === 'expense' ? newEntry.amount : newDeposit.amount} onChange={e => activeModal === 'expense' ? setNewEntry({...newEntry, amount: e.target.value}) : setNewDeposit({...newDeposit, amount: e.target.value})} />
+                                            </div>
+
+                                            {activeModal === 'expense' && (
+                                                <>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Category</label>
+                                                        <select className="w-full p-4 bg-slate-100 border-0 rounded-xl font-bold appearance-none" value={newEntry.category} onChange={e=>setNewEntry({...newEntry, category: e.target.value})}>
+                                                            {CATEGORIES.map(c=><option key={c}>{c}</option>)}
+                                                        </select>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Receipt Image</label>
+                                                        <input type="file" accept="image/*" className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-indigo-50 file:text-indigo-700 font-bold" onChange={(e) => {
+                                                            const file = e.target.files[0];
+                                                            if (file) {
+                                                                const reader = new FileReader();
+                                                                reader.onloadend = () => setNewEntry(p => ({ ...p, receipt: reader.result, receiptName: file.name }));
+                                                                reader.readAsDataURL(file);
+                                                            }
+                                                        }} />
+                                                    </div>
+                                                </>
+                                            )}
+                                            <button type="submit" className={`w-full py-5 text-white rounded-2xl font-black shadow-xl transition-all ${activeModal==='expense'?'bg-indigo-600 shadow-indigo-100 hover:bg-indigo-700':'bg-emerald-600 shadow-emerald-100 hover:bg-emerald-700'}`}>
+                                                {activeModal === 'expense' ? 'Sync Expense' : 'Inject Credit'}
+                                            </button>
+                                        </form>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Receipt Viewer Overlay */}
+                    {selectedReceipt && (
+                        <div className="fixed inset-0 bg-slate-900/95 flex flex-col p-4 z-[100] backdrop-blur-md">
+                            <button onClick={()=>setSelectedReceipt(null)} className="self-end text-white font-black bg-white/10 px-4 py-2 rounded-xl mb-4 text-xs">CLOSE</button>
+                            <div className="flex-1 bg-white rounded-2xl overflow-hidden flex items-center justify-center p-2">
+                                <img src={selectedReceipt} className="max-w-full max-h-full object-contain" />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const SidebarLink = ({ active, label, onClick }) => (
+            <button onClick={onClick} className={`w-full text-left p-4 rounded-2xl font-black transition-all ${active ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-slate-500 hover:bg-slate-50'}`}>{label}</button>
+        );
+
+        const MobileNavLink = ({ active, label, onClick }) => (
+            <button onClick={onClick} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${active ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>{label}</button>
+        );
+
+        const Input = ({ label, ...props }) => (
+            <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{label}</label>
+                <input className="w-full p-4 bg-slate-100 border-0 rounded-xl font-bold focus:ring-2 focus:ring-indigo-500 transition-all outline-none" {...props} />
+            </div>
+        );
+
+        const StatCard = ({ title, value, sub }) => (
+            <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border shadow-sm relative overflow-hidden">
+                <div className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-2">{title}</div>
+                <div className={`text-3xl md:text-5xl font-black tracking-tight ${value < 0 ? 'text-red-500' : 'text-slate-800'}`}>${value.toFixed(2)}</div>
+                <div className="mt-4 pt-4 border-t border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">{sub}</div>
+            </div>
+        );
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
