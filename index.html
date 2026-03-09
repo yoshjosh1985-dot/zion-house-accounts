@@ -3,104 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>HouseBank | Mobile-Ready Ledger</title>
-    <!-- Tailwind CSS -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#4f46e5">
+    <title>HouseBank | AI Stabilized</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React and Babel -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Firebase Compat SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-        body { 
-            font-family: 'Plus Jakarta Sans', sans-serif; 
-            overscroll-behavior-y: contain;
-        }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-        @media print { .no-print { display: none !important; } }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .animate-scan { background: linear-gradient(to bottom, transparent 0%, rgba(79, 70, 229, 0.4) 50%, transparent 100%); background-size: 100% 200%; animation: scan 2s linear infinite; }
+        @keyframes scan { from { background-position: 0 -100%; } to { background-position: 0 100%; } }
+        .shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+        @keyframes shake { 10%, 90% { transform: translate3d(-1px, 0, 0); } 20%, 80% { transform: translate3d(2px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-4px, 0, 0); } 40%, 60% { transform: translate3d(4px, 0, 0); } }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-900">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
-        // Your Firebase Configuration Integrated
-        const HARDCODED_CONFIG = {
+        // Global Constants
+        const firebaseConfig = {
             apiKey: "AIzaSyA53SpP4BQ3kU325m8PL3-7rY7iUTfp45s",
             authDomain: "home-accounting-2463d.firebaseapp.com",
             projectId: "home-accounting-2463d",
-            storageBucket: "home-accounting-2463d.firebasestorage.app",
+            storageBucket: "home-accounting-2463d.appspot.com",
             messagingSenderId: "645556460544",
-            appId: "1:645556460544:web:f7d822278af64654918ce5",
-            measurementId: "G-WBGRYK26W5"
+            appId: "1:645556460544:web:f7d822278af64654918ce5"
         };
 
-        const getInjectedConfig = () => {
-            if (HARDCODED_CONFIG) return HARDCODED_CONFIG;
-            try {
-                return typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-            } catch (e) {
-                return null;
-            }
-        };
+        const appId = 'home-accounting-2463d';
+        const apiKey = ""; // Injected at runtime by the environment
 
-        const config = getInjectedConfig();
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'home-accounting-2463d';
-        
-        if (config) {
-            firebase.initializeApp(config);
+        // Initialize Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
         }
 
-        const CATEGORIES = ['Groceries', 'Utilities', 'Rent/Mortgage', 'Transport', 'Entertainment', 'Healthcare', 'Education', 'Miscellaneous'];
+        const LEDGERS = { HOUSEHOLD: 'household', FIXED_COSTS: 'fixed_costs' };
+        const CATEGORIES = {
+            [LEDGERS.HOUSEHOLD]: ['Groceries', 'Household Items', 'Dining Out', 'Cleaning', 'Toiletries', 'Miscellaneous'],
+            [LEDGERS.FIXED_COSTS]: ['Rent/Mortgage', 'Electricity', 'Water', 'Internet', 'Insurance', 'Phone Bill']
+        };
 
         const App = () => {
             const [user, setUser] = React.useState(null);
             const [view, setView] = React.useState('dashboard');
+            const [activeLedger, setActiveLedger] = React.useState(LEDGERS.HOUSEHOLD);
             const [transactions, setTransactions] = React.useState([]);
             const [deposits, setDeposits] = React.useState([]);
-            const [activeModal, setActiveModal] = React.useState(null);
-            const [selectedReceipt, setSelectedReceipt] = React.useState(null);
+            const [allLineItems, setAllLineItems] = React.useState([]);
             const [loading, setLoading] = React.useState(true);
-            const [error, setError] = React.useState(null);
+            const [aiProcessing, setAiProcessing] = React.useState(false);
+            const [errorMsg, setErrorMsg] = React.useState(null);
+            const [activeModal, setActiveModal] = React.useState(null);
+            const [searchTerm, setSearchTerm] = React.useState('');
+            const [searchItem, setSearchItem] = React.useState('');
             
-            // Report States
-            const [reportRange, setReportRange] = React.useState('monthly');
-            const [customStart, setCustomStart] = React.useState('');
-            const [customEnd, setCustomEnd] = React.useState('');
-
-            const [newEntry, setNewEntry] = React.useState({
+            const [formData, setFormData] = React.useState({
                 date: new Date().toISOString().split('T')[0],
-                description: '', amount: '', category: 'Groceries', receipt: null, receiptName: ''
-            });
-
-            const [newDeposit, setNewDeposit] = React.useState({
-                date: new Date().toISOString().split('T')[0], description: 'Weekly Credit', amount: ''
+                description: '', amount: '', category: 'Groceries', contributor: '', targetBill: '', receiptUrl: '', lineItems: []
             });
 
             React.useEffect(() => {
                 const initAuth = async () => {
                     try {
-                        const auth = firebase.auth();
-                        await auth.signInAnonymously();
-                    } catch (e) { 
+                        await firebase.auth().signInAnonymously();
+                    } catch (e) {
                         console.error("Auth failed", e);
-                        setError("Database access denied. Please ensure Anonymous Auth is enabled in Firebase.");
-                        setLoading(false);
                     }
                 };
-
                 initAuth();
-                const unsubscribe = firebase.auth().onAuthStateChanged((u) => {
-                    setUser(u);
-                    setLoading(false);
+                const unsubscribe = firebase.auth().onAuthStateChanged((u) => { 
+                    setUser(u); 
+                    setLoading(false); 
                 });
                 return () => unsubscribe();
             }, []);
@@ -108,305 +93,326 @@
             React.useEffect(() => {
                 if (!user) return;
                 const db = firebase.firestore();
-                // Standardizing collection paths
-                const collectionPath = `artifacts/${appId}/public/data`;
-                
-                const unsubT = db.collection(`${collectionPath}/transactions`).onSnapshot((s) => {
-                    setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
-                }, (err) => {
-                    console.error("Firestore error:", err);
-                    setError("Database error. Ensure Firestore rules are set to Test Mode.");
-                });
-                
-                const unsubD = db.collection(`${collectionPath}/deposits`).onSnapshot((s) => {
-                    setDeposits(s.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
-                }, (err) => console.error("Firestore error:", err));
-                
-                return () => { unsubT(); unsubD(); };
-            }, [user]);
+                const transPath = `artifacts/${appId}/public/data/transactions_${activeLedger}`;
+                const depPath = `artifacts/${appId}/public/data/deposits_${activeLedger}`;
+                const itemsPath = `artifacts/${appId}/public/data/line_items_${activeLedger}`;
+
+                const unsubT = db.collection(transPath).onSnapshot(s => setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'expense' }))), err => console.error(err));
+                const unsubD = db.collection(depPath).onSnapshot(s => setDeposits(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'deposit' }))), err => console.error(err));
+                const unsubI = db.collection(itemsPath).onSnapshot(s => setAllLineItems(s.docs.map(d => ({ ...d.data(), id: d.id }))), err => console.error(err));
+
+                return () => { unsubT(); unsubD(); unsubI(); };
+            }, [user, activeLedger]);
 
             const stats = React.useMemo(() => {
-                const now = new Date();
-                const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - 7);
-                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-                const getSum = (list) => list.reduce((a, c) => a + (Number(c.amount) || 0), 0);
-
-                const totalEx = getSum(transactions);
-                const totalDep = getSum(deposits);
-                const wEx = getSum(transactions.filter(t => new Date(t.date) >= startOfWeek));
-                const wIn = getSum(deposits.filter(d => new Date(d.date) >= startOfWeek));
-                const mEx = getSum(transactions.filter(t => new Date(t.date) >= startOfMonth));
-                const mIn = getSum(deposits.filter(d => new Date(d.date) >= startOfMonth));
-                const cats = transactions.reduce((a, c) => { a[c.category] = (a[c.category] || 0) + (Number(c.amount) || 0); return a; }, {});
-
-                return { balance: totalDep - totalEx, weeklyRemaining: wIn - wEx, monthlyRemaining: mIn - mEx, weeklyExpenses: wEx, monthlyExpenses: mEx, cats, totalEx };
+                const totalEx = transactions.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+                const totalDep = deposits.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+                const billProgress = transactions.reduce((acc, t) => {
+                    const deps = deposits.filter(d => d.targetBill === t.id);
+                    const paid = deps.reduce((a, c) => a + c.amount, 0);
+                    acc[t.id] = { total: t.amount, paid, remaining: Math.max(0, t.amount - paid) };
+                    return acc;
+                }, {});
+                return { balance: totalDep - totalEx, billProgress };
             }, [transactions, deposits]);
 
-            const submitEx = async (e) => {
-                e.preventDefault();
-                const db = firebase.firestore();
-                await db.collection(`artifacts/${appId}/public/data/transactions`).add({
-                    ...newEntry, amount: parseFloat(newEntry.amount), userId: user.uid, ts: Date.now()
-                });
-                setActiveModal(null);
-                setNewEntry({ date: new Date().toISOString().split('T')[0], description: '', amount: '', category: 'Groceries', receipt: null, receiptName: '' });
-            };
-
-            const submitDep = async (e) => {
-                e.preventDefault();
-                const db = firebase.firestore();
-                await db.collection(`artifacts/${appId}/public/data/deposits`).add({
-                    ...newDeposit, amount: parseFloat(newDeposit.amount), userId: user.uid, ts: Date.now()
-                });
-                setActiveModal(null);
-                setNewDeposit({ date: new Date().toISOString().split('T')[0], description: 'Weekly Credit', amount: '' });
-            };
-
-            const generatePDF = () => {
-                let start, end;
-                const now = new Date();
-                if (reportRange === 'weekly') { start = new Date(); start.setDate(now.getDate() - 7); end = now; }
-                else if (reportRange === 'monthly') { start = new Date(now.getFullYear(), now.getMonth(), 1); end = now; }
-                else { start = new Date(customStart); end = new Date(customEnd); }
-
-                const filteredEx = transactions.filter(t => new Date(t.date) >= start && new Date(t.date) <= end);
-                const filteredDep = deposits.filter(d => new Date(d.date) >= start && new Date(d.date) <= end);
-                const sumEx = filteredEx.reduce((a,c)=>a+c.amount,0);
-                const sumDep = filteredDep.reduce((a,c)=>a+c.amount,0);
+            const runAiScanner = async (file) => {
+                if (!file) return;
+                setAiProcessing(true);
+                setErrorMsg(null);
                 
-                const printWindow = window.open('', '_blank');
-                printWindow.document.write(`<html><head><title>HouseBank Report</title><style>body { font-family: sans-serif; padding: 20px; color: #1e293b; } .header { border-bottom: 2px solid #4f46e5; margin-bottom: 20px; padding-bottom: 10px; } table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }</style></head><body><div class="header"><h1>HouseBank Report</h1><p>${start.toLocaleDateString()} - ${end.toLocaleDateString()}</p></div><p><strong>Net Balance: $${(sumDep - sumEx).toFixed(2)}</strong></p><table><thead><tr><th>Date</th><th>Desc</th><th>Amt</th></tr></thead><tbody>${filteredEx.map(t=>`<tr><td>${t.date}</td><td>${t.description}</td><td>-$${t.amount.toFixed(2)}</td></tr>`).join('')}${filteredDep.map(d=>`<tr><td>${d.date}</td><td>${d.description}</td><td>+$${d.amount.toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`);
-                printWindow.document.close();
-                printWindow.print();
+                // 1. Initial Check for API Key
+                if (!apiKey && typeof __apiKey === 'undefined') {
+                    // Fallback: wait a moment for environment injection if this is first run
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+
+                try {
+                    // Storage Upload
+                    const storageRef = firebase.storage().ref().child(`receipts/${Date.now()}_${file.name}`);
+                    const uploadTask = await storageRef.put(file);
+                    const downloadUrl = await uploadTask.ref.getDownloadURL();
+
+                    // Read File for AI
+                    const base64Data = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result.split(',')[1]);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(file);
+                    });
+
+                    // API Call with exponential backoff
+                    const callGemini = async (attempt = 0) => {
+                        const actualKey = apiKey || (window.__apiKey || "");
+                        if (!actualKey) throw new Error("API Key not initialized. Please try again in 5 seconds.");
+
+                        const prompt = "Analyze this receipt. Return ONLY JSON with fields: description (Store name), amount (total number), and items (array of {name, price}).";
+                        
+                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${actualKey}`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                contents: [{ 
+                                    parts: [
+                                        { text: prompt }, 
+                                        { inlineData: { mimeType: file.type, data: base64Data } }
+                                    ] 
+                                }],
+                                generationConfig: { responseMimeType: "application/json" }
+                            })
+                        });
+
+                        if (!response.ok) {
+                            if (attempt < 3) {
+                                await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+                                return callGemini(attempt + 1);
+                            }
+                            throw new Error(`Cloud connection failed (${response.status})`);
+                        }
+                        return response.json();
+                    };
+
+                    const result = await callGemini();
+                    const textResponse = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    
+                    if (!textResponse) throw new Error("AI returned empty data.");
+                    
+                    const extracted = JSON.parse(textResponse);
+                    
+                    setFormData(prev => ({
+                        ...prev,
+                        description: extracted.description || prev.description,
+                        amount: extracted.amount || prev.amount,
+                        receiptUrl: downloadUrl,
+                        lineItems: extracted.items || []
+                    }));
+
+                } catch (err) {
+                    console.error("Scanner Error:", err);
+                    setErrorMsg(err.message || "Scanning timed out. Enter details below.");
+                } finally {
+                    setAiProcessing(false);
+                }
             };
 
-            if (loading) return (
-                <div className="h-screen flex flex-col items-center justify-center bg-white p-6">
-                    <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <div className="font-bold text-indigo-600 uppercase tracking-widest text-xs animate-pulse">Establishing Secure Connection...</div>
-                </div>
-            );
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                const db = firebase.firestore();
+                const type = activeModal === 'deposit' ? 'deposit' : 'expense';
+                const collectionName = type === 'expense' ? `transactions_${activeLedger}` : `deposits_${activeLedger}`;
+                
+                const data = {
+                    date: formData.date,
+                    description: formData.description,
+                    amount: parseFloat(formData.amount) || 0,
+                    category: formData.category,
+                    contributor: formData.contributor,
+                    targetBill: formData.targetBill,
+                    receiptUrl: formData.receiptUrl,
+                    ts: Date.now()
+                };
 
-            if (error) return (
-                <div className="h-screen flex items-center justify-center p-6 bg-slate-50 text-center">
-                    <div className="bg-white p-10 rounded-[2.5rem] shadow-xl max-w-sm border border-red-100">
-                        <div className="text-red-500 text-4xl mb-4">⚠️</div>
-                        <h2 className="text-xl font-black text-slate-800 mb-2">Sync Error</h2>
-                        <p className="text-slate-500 text-sm mb-6">{error}</p>
-                        <button onClick={() => window.location.reload()} className="px-8 py-3 bg-indigo-600 text-white font-black rounded-2xl shadow-lg">Retry Connection</button>
-                    </div>
-                </div>
-            );
+                const doc = await db.collection(`artifacts/${appId}/public/data/${collectionName}`).add(data);
+                
+                if (formData.lineItems.length > 0) {
+                    const batch = db.batch();
+                    formData.lineItems.forEach(item => {
+                        const ref = db.collection(`artifacts/${appId}/public/data/line_items_${activeLedger}`).doc();
+                        batch.set(ref, { ...item, transactionId: doc.id, date: formData.date });
+                    });
+                    await batch.commit();
+                }
+
+                setActiveModal(null);
+                setFormData({ date: new Date().toISOString().split('T')[0], description: '', amount: '', category: 'Groceries', contributor: '', targetBill: '', receiptUrl: '', lineItems: [] });
+            };
+
+            const filteredHistory = React.useMemo(() => {
+                const combined = [...transactions, ...deposits].sort((a,b) => new Date(b.date) - new Date(a.date));
+                if (!searchTerm) return combined;
+                return combined.filter(i => i.description?.toLowerCase().includes(searchTerm.toLowerCase()));
+            }, [transactions, deposits, searchTerm]);
+
+            if (loading) return <div className="h-screen flex items-center justify-center font-black text-indigo-600 uppercase tracking-tighter animate-pulse">Establishing Secure Link...</div>;
 
             return (
-                <div className="flex h-screen overflow-hidden flex-col md:flex-row">
+                <div className="flex flex-col md:flex-row min-h-screen bg-[#fcfdfe]">
                     {/* Sidebar */}
-                    <aside className="md:w-72 bg-white border-b md:border-r flex flex-row md:flex-col p-4 md:p-8 justify-between md:justify-start z-10">
-                        <div className="text-xl md:text-2xl font-black text-indigo-600 tracking-tighter italic">HOUSEBANK</div>
-                        <nav className="hidden md:flex flex-col space-y-2 mt-10 flex-1">
-                            <SidebarLink active={view==='dashboard'} label="Dashboard" onClick={()=>setView('dashboard')} />
-                            <SidebarLink active={view==='ledger'} label="Expenses" onClick={()=>setView('ledger')} />
-                            <SidebarLink active={view==='deposits'} label="Credits" onClick={()=>setView('deposits')} />
-                            <div className="pt-8 space-y-2">
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-4">Reporting</span>
-                                <button onClick={()=>setActiveModal('report')} className="w-full text-left p-4 rounded-2xl font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-all">PDF Report</button>
-                            </div>
+                    <aside className="hidden md:flex flex-col w-72 bg-white border-r p-8 shrink-0">
+                        <div className="text-xl font-black text-indigo-600 mb-10 italic tracking-tighter">HOUSEBANK.AI</div>
+                        <nav className="space-y-1">
+                            {['dashboard', 'ledger', 'analytics'].map(v => (
+                                <button key={v} onClick={()=>setView(v)} className={`w-full text-left p-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${view===v?'bg-indigo-600 text-white shadow-xl shadow-indigo-100 scale-[1.02]':'text-slate-400 hover:text-indigo-600'}`}>{v}</button>
+                            ))}
                         </nav>
-                        <div className="md:mt-auto bg-slate-900 p-3 md:p-6 rounded-xl md:rounded-[2rem] text-white">
-                            <div className="text-[8px] md:text-[10px] text-slate-400 font-black tracking-widest uppercase">Net Balance</div>
-                            <div className="text-sm md:text-3xl font-black">${stats.balance.toFixed(2)}</div>
-                        </div>
                     </aside>
 
-                    {/* Main Content */}
-                    <main className="flex-1 overflow-y-auto p-4 md:p-12 custom-scrollbar pb-24 md:pb-12 bg-slate-50/50">
-                        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-                            <div>
-                                <h2 className="text-2xl md:text-4xl font-black text-slate-800 capitalize tracking-tight">{view}</h2>
-                                <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.2em] md:mt-1">Cloud Synced</p>
-                            </div>
-                            <div className="flex w-full md:w-auto gap-2">
-                                <button onClick={()=>setActiveModal('deposit')} className="flex-1 md:flex-none bg-white text-emerald-600 px-4 md:px-6 py-3 rounded-xl md:rounded-2xl font-black text-xs md:text-sm border shadow-sm">Add Credit</button>
-                                <button onClick={()=>setActiveModal('expense')} className="flex-1 md:flex-none bg-indigo-600 text-white px-4 md:px-6 py-3 rounded-xl md:rounded-2xl font-black text-xs md:text-sm shadow-xl shadow-indigo-100">New Expense</button>
-                            </div>
-                        </header>
+                    <main className="flex-1 p-4 md:p-10 pb-32 max-w-5xl mx-auto w-full">
+                        <div className="flex bg-slate-100 p-1 rounded-2xl mb-8 w-fit shadow-inner">
+                            {Object.values(LEDGERS).map(l => (
+                                <button key={l} onClick={()=>setActiveLedger(l)} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${activeLedger === l ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}>
+                                    {l.replace('_', ' ')}
+                                </button>
+                            ))}
+                        </div>
 
                         {view === 'dashboard' ? (
-                            <div className="grid grid-cols-1 gap-6 md:gap-8">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
-                                    <StatCard title="Weekly Remaining" value={stats.weeklyRemaining} sub={`Spent: $${stats.weeklyExpenses.toFixed(2)}`} />
-                                    <StatCard title="Monthly Remaining" value={stats.monthlyRemaining} sub={`Spent: $${stats.monthlyExpenses.toFixed(2)}`} />
+                            <div className="space-y-6">
+                                <div className="flex justify-between items-end">
+                                    <h1 className="text-3xl font-black text-slate-800 tracking-tight">Cloud Overview</h1>
+                                    <div className="flex gap-2">
+                                        <button onClick={()=>setActiveModal('expense')} className="bg-indigo-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95">+ Add Expense</button>
+                                        <button onClick={()=>setActiveModal('deposit')} className="bg-emerald-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95">+ Add Credit</button>
+                                    </div>
                                 </div>
-                                <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border shadow-sm">
-                                    <h3 className="font-black text-lg mb-6 flex items-center">
-                                        <div className="w-2 h-2 bg-indigo-500 rounded-full mr-3"></div>
-                                        Breakdown
-                                    </h3>
-                                    <div className="space-y-6">
-                                        {CATEGORIES.map(c => (
-                                            <div key={c}>
-                                                <div className="flex justify-between font-black text-[10px] text-slate-400 uppercase tracking-widest mb-2">
-                                                    <span>{c}</span>
-                                                    <span className="text-slate-900">${(stats.cats[c]||0).toFixed(2)}</span>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] relative overflow-hidden group shadow-2xl">
+                                        <div className="relative z-10">
+                                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Available Funds</div>
+                                            <div className="text-4xl font-black tracking-tighter">${stats.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+                                        </div>
+                                        <div className="absolute -right-4 -bottom-4 text-9xl opacity-10 rotate-12 transition-transform group-hover:scale-125">💳</div>
+                                    </div>
+                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Unpaid Liabilities</h3>
+                                        <div className="space-y-4">
+                                            {transactions.filter(t => stats.billProgress[t.id]?.remaining > 0).length === 0 ? <p className="text-xs text-slate-300 font-bold uppercase italic">All bills settled</p> : 
+                                            transactions.filter(t => stats.billProgress[t.id]?.remaining > 0).slice(0,3).map(t => (
+                                                <div key={t.id} className="flex justify-between items-center group/item">
+                                                    <span className="font-bold text-sm text-slate-700">{t.description}</span>
+                                                    <span className="font-black text-indigo-600 text-sm group-hover/item:scale-110 transition-transform">${stats.billProgress[t.id].remaining.toFixed(2)}</span>
                                                 </div>
-                                                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-indigo-600" style={{width: `${stats.totalEx > 0 ? ((stats.cats[c]||0)/stats.totalEx)*100 : 0}%`}} />
-                                                </div>
-                                            </div>
-                                        ))}
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        ) : (
-                            <div className="bg-white rounded-2xl md:rounded-[3rem] border shadow-sm overflow-hidden">
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left min-w-[500px]">
-                                        <thead>
-                                            <tr className="bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                                <th className="px-6 py-4">Date</th>
-                                                <th className="px-6 py-4">Description</th>
-                                                <th className="px-6 py-4">Amount</th>
-                                                {view==='ledger' && <th className="px-6 py-4">Scan</th>}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {(view==='ledger'?transactions:deposits).map(item => (
-                                                <tr key={item.id} className="hover:bg-slate-50">
-                                                    <td className="px-6 py-4 text-xs font-bold text-slate-400">{item.date}</td>
-                                                    <td className="px-6 py-4 font-black text-slate-800 text-sm">{item.description}</td>
-                                                    <td className={`px-6 py-4 font-black ${view==='deposits'?'text-emerald-500':'text-slate-900'}`}>
-                                                        ${Number(item.amount).toFixed(2)}
-                                                    </td>
-                                                    {view==='ledger' && (
-                                                        <td className="px-6 py-4">
-                                                            {item.receipt ? (
-                                                                <button onClick={()=>setSelectedReceipt(item.receipt)} className="text-indigo-600 font-black text-[10px] uppercase underline">View</button>
-                                                            ) : "-"}
-                                                        </td>
-                                                    )}
-                                                </tr>
-                                            ))}
-                                            {(view === 'ledger' ? transactions : deposits).length === 0 && (
-                                                <tr>
-                                                    <td colSpan="4" className="px-6 py-12 text-center text-slate-400 font-bold italic">No data found in the cloud yet.</td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
+                        ) : view === 'ledger' ? (
+                            <div className="space-y-6">
+                                <div className="flex justify-between items-center">
+                                    <h1 className="text-3xl font-black text-slate-800">Ledger</h1>
+                                    <input type="text" placeholder="Search logs..." className="p-4 bg-white border rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-50 shadow-sm" onChange={e=>setSearchTerm(e.target.value)} />
                                 </div>
+                                <div className="bg-white rounded-[2rem] border overflow-hidden shadow-sm">
+                                    {filteredHistory.length === 0 ? <div className="p-20 text-center text-slate-300 font-bold uppercase tracking-widest">No entries found</div> : 
+                                    filteredHistory.map(item => (
+                                        <div key={item.id} className="p-6 border-b last:border-0 flex justify-between items-center hover:bg-slate-50 transition-colors cursor-pointer group">
+                                            <div>
+                                                <div className="text-[10px] font-bold text-slate-400 uppercase">{item.date}</div>
+                                                <div className="font-black text-slate-800 group-hover:text-indigo-600 transition-colors">{item.description}</div>
+                                                <div className="text-[10px] font-bold text-indigo-500 uppercase">{item.type==='expense'?item.category:`From ${item.contributor}`}</div>
+                                            </div>
+                                            <div className={`font-black text-lg ${item.type==='expense'?'text-slate-900':'text-emerald-600'}`}>
+                                                {item.type==='expense'?'-':'+'}${(item.amount || 0).toFixed(2)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-8">
+                                <div className="max-w-md">
+                                    <h1 className="text-3xl font-black text-slate-800">Historical Tracking</h1>
+                                    <input type="text" placeholder="Type an item (Milk, Eggs...)" className="w-full mt-4 p-5 bg-white border-2 border-slate-100 rounded-[2rem] font-bold shadow-lg focus:border-indigo-500 transition-all outline-none" value={searchItem} onChange={e=>setSearchItem(e.target.value)} />
+                                </div>
+                                {searchItem && (
+                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm animate-in fade-in slide-in-from-bottom-4">
+                                        <h3 className="text-[10px] font-black text-slate-400 mb-6 uppercase tracking-widest">Price Evolution</h3>
+                                        <div className="space-y-4">
+                                            {allLineItems.filter(i => i.name.toLowerCase().includes(searchItem.toLowerCase())).sort((a,b)=>new Date(b.date)-new Date(a.date)).map((li, idx) => (
+                                                <div key={idx} className="flex justify-between border-b border-slate-50 pb-4 last:border-0">
+                                                    <span className="font-bold text-slate-700">{li.name} <span className="text-[10px] text-slate-400 font-normal ml-2">{li.date}</span></span>
+                                                    <span className="font-black text-indigo-600">${Number(li.price).toFixed(2)}</span>
+                                                </div>
+                                            ))}
+                                            {allLineItems.filter(i => i.name.toLowerCase().includes(searchItem.toLowerCase())).length === 0 && <p className="text-center py-4 text-slate-300 font-bold uppercase text-[10px]">No historical matches</p>}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
-
-                        {/* Mobile Nav Bar */}
-                        <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t flex justify-around p-3 z-50 shadow-2xl">
-                             <MobileNavLink active={view==='dashboard'} label="Dash" onClick={()=>setView('dashboard')} />
-                             <MobileNavLink active={view==='ledger'} label="Exp" onClick={()=>setView('ledger')} />
-                             <MobileNavLink active={view==='deposits'} label="Cred" onClick={()=>setView('deposits')} />
-                             <MobileNavLink active={activeModal==='report'} label="PDF" onClick={()=>setActiveModal('report')} />
-                        </div>
                     </main>
 
-                    {/* Modals */}
-                    {activeModal && (
-                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end md:items-center justify-center p-4 z-[60]">
-                            <div className="bg-white rounded-t-3xl md:rounded-[3rem] w-full max-w-lg shadow-2xl flex flex-col max-h-[95vh] md:max-h-[90vh] animate-in slide-in-from-bottom duration-300">
-                                <div className="flex justify-between items-center p-6 md:p-8 border-b md:border-0">
-                                    <h3 className="text-2xl font-black text-slate-800 tracking-tight">
-                                        {activeModal === 'expense' ? 'Log Expense' : activeModal === 'deposit' ? 'Add Credit' : 'Generate Report'}
-                                    </h3>
-                                    <button onClick={()=>setActiveModal(null)} className="p-2 text-slate-400 bg-slate-100 rounded-full hover:bg-slate-200">✕</button>
-                                </div>
-                                
-                                <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
-                                    {activeModal === 'report' ? (
-                                        <div className="space-y-6 pb-6">
-                                            <div className="grid grid-cols-3 gap-2">
-                                                {['weekly', 'monthly', 'custom'].map(r => (
-                                                    <button key={r} onClick={()=>setReportRange(r)} className={`p-3 rounded-xl font-black text-[10px] uppercase tracking-widest ${reportRange===r?'bg-indigo-600 text-white shadow-lg':'bg-slate-100 text-slate-500'}`}>{r}</button>
-                                                ))}
-                                            </div>
-                                            {reportRange === 'custom' && (
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <Input label="From" type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)} />
-                                                    <Input label="To" type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} />
-                                                </div>
-                                            )}
-                                            <button onClick={generatePDF} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700">Prepare PDF</button>
-                                        </div>
-                                    ) : (
-                                        <form onSubmit={activeModal === 'expense' ? submitEx : submitDep} className="space-y-5 pb-6">
-                                            <Input label="Date" type="date" required value={activeModal === 'expense' ? newEntry.date : newDeposit.date} onChange={e => activeModal === 'expense' ? setNewEntry({...newEntry, date: e.target.value}) : setNewDeposit({...newDeposit, date: e.target.value})} />
-                                            <Input label="Description" placeholder="Payee / Note" required value={activeModal === 'expense' ? newEntry.description : newDeposit.description} onChange={e => activeModal === 'expense' ? setNewEntry({...newEntry, description: e.target.value}) : setNewDeposit({...newDeposit, description: e.target.value})} />
-                                            
-                                            <div className="space-y-1 text-center py-4 bg-slate-50 rounded-3xl">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount ($)</label>
-                                                <input type="number" step="0.01" required placeholder="0.00" className={`w-full bg-transparent border-0 text-5xl font-black text-center focus:ring-0 ${activeModal==='expense'?'text-slate-800':'text-emerald-600'}`} value={activeModal === 'expense' ? newEntry.amount : newDeposit.amount} onChange={e => activeModal === 'expense' ? setNewEntry({...newEntry, amount: e.target.value}) : setNewDeposit({...newDeposit, amount: e.target.value})} />
-                                            </div>
+                    {/* Nav Mobile */}
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-4 flex justify-around md:hidden z-40 pb-10">
+                        {['dashboard', 'ledger', 'analytics'].map(v => (
+                            <button key={v} onClick={()=>setView(v)} className={`text-[10px] font-black uppercase tracking-widest ${view===v?'text-indigo-600':'text-slate-400'}`}>{v}</button>
+                        ))}
+                    </nav>
 
-                                            {activeModal === 'expense' && (
-                                                <>
-                                                    <div className="space-y-1">
-                                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Category</label>
-                                                        <select className="w-full p-4 bg-slate-100 border-0 rounded-xl font-bold appearance-none" value={newEntry.category} onChange={e=>setNewEntry({...newEntry, category: e.target.value})}>
-                                                            {CATEGORIES.map(c=><option key={c}>{c}</option>)}
-                                                        </select>
-                                                    </div>
-                                                    <div className="space-y-1">
-                                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Receipt Image</label>
-                                                        <input type="file" accept="image/*" className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-indigo-50 file:text-indigo-700 font-bold" onChange={(e) => {
-                                                            const file = e.target.files[0];
-                                                            if (file) {
-                                                                const reader = new FileReader();
-                                                                reader.onloadend = () => setNewEntry(p => ({ ...p, receipt: reader.result, receiptName: file.name }));
-                                                                reader.readAsDataURL(file);
-                                                            }
-                                                        }} />
-                                                    </div>
-                                                </>
-                                            )}
-                                            <button type="submit" className={`w-full py-5 text-white rounded-2xl font-black shadow-xl transition-all ${activeModal==='expense'?'bg-indigo-600 shadow-indigo-100 hover:bg-indigo-700':'bg-emerald-600 shadow-emerald-100 hover:bg-emerald-700'}`}>
-                                                {activeModal === 'expense' ? 'Sync Expense' : 'Inject Credit'}
-                                            </button>
-                                        </form>
+                    {/* Modal */}
+                    {activeModal && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+                            <form onSubmit={handleSubmit} className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 space-y-6 shadow-2xl my-auto relative animate-in zoom-in duration-200">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="text-xl font-black uppercase tracking-tighter text-slate-800">{activeModal}</h2>
+                                    <button type="button" onClick={()=>setActiveModal(null)} className="w-10 h-10 flex items-center justify-center bg-slate-50 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all">✕</button>
+                                </div>
+
+                                {activeModal === 'expense' && (
+                                    <div className={`group relative h-40 rounded-[2rem] border-4 border-dashed flex flex-col items-center justify-center transition-all ${aiProcessing?'animate-scan border-indigo-500 bg-indigo-50/50':'border-slate-100 bg-slate-50 hover:border-indigo-400 hover:bg-white cursor-pointer'}`}>
+                                        <input type="file" onChange={e => runAiScanner(e.target.files[0])} className="absolute inset-0 opacity-0 cursor-pointer z-10" accept="image/*" disabled={aiProcessing} />
+                                        <div className="text-center pointer-events-none p-4">
+                                            <div className={`text-base font-black uppercase tracking-tight transition-colors ${aiProcessing ? "text-indigo-600" : "text-slate-400 group-hover:text-indigo-600"}`}>
+                                                {aiProcessing ? "AI Scanning... (Don't Close)" : "📸 SNAP & SCAN"}
+                                            </div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase mt-2">Automatic Price & Store Detection</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {errorMsg && <div className="p-5 bg-red-50 border border-red-100 text-red-600 text-[11px] font-bold rounded-2xl shake flex items-center gap-3">
+                                    <span className="text-lg">⚠️</span> {errorMsg}
+                                </div>}
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <Input label="Date" type="date" value={formData.date} onChange={e=>setFormData({...formData, date:e.target.value})} />
+                                    <Input label="Grand Total ($)" type="number" step="0.01" value={formData.amount} onChange={e=>setFormData({...formData, amount:e.target.value})} required />
+                                </div>
+                                <Input label="Merchant / Description" placeholder="Where did you spend?" value={formData.description} onChange={e=>setFormData({...formData, description:e.target.value})} required />
+                                
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1 tracking-widest">
+                                        {activeModal === 'expense' ? 'Category' : 'Source'}
+                                    </label>
+                                    {activeModal === 'expense' ? (
+                                        <select className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-0 focus:ring-4 focus:ring-indigo-50 appearance-none" value={formData.category} onChange={e=>setFormData({...formData, category:e.target.value})}>
+                                            {CATEGORIES[activeLedger].map(c => <option key={c}>{c}</option>)}
+                                        </select>
+                                    ) : (
+                                        <input className="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border-0 focus:ring-4 focus:ring-indigo-50" placeholder="Who paid?" value={formData.contributor} onChange={e=>setFormData({...formData, contributor:e.target.value})} />
                                     )}
                                 </div>
-                            </div>
-                        </div>
-                    )}
 
-                    {/* Receipt Viewer Overlay */}
-                    {selectedReceipt && (
-                        <div className="fixed inset-0 bg-slate-900/95 flex flex-col p-4 z-[100] backdrop-blur-md">
-                            <button onClick={()=>setSelectedReceipt(null)} className="self-end text-white font-black bg-white/10 px-4 py-2 rounded-xl mb-4 text-xs">CLOSE</button>
-                            <div className="flex-1 bg-white rounded-2xl overflow-hidden flex items-center justify-center p-2">
-                                <img src={selectedReceipt} className="max-w-full max-h-full object-contain" />
-                            </div>
+                                {formData.lineItems.length > 0 && (
+                                    <div className="p-6 bg-slate-50 rounded-[2rem] space-y-3 max-h-48 overflow-y-auto no-scrollbar border border-slate-100">
+                                        <div className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-[0.2em] border-b pb-2 flex justify-between">
+                                            <span>AI Detected Items</span>
+                                            <span className="text-indigo-600">{formData.lineItems.length} items</span>
+                                        </div>
+                                        {formData.lineItems.map((li, i) => (
+                                            <div key={i} className="flex justify-between text-[11px] font-bold text-slate-600 animate-in slide-in-from-left-2" style={{animationDelay: `${i*50}ms`}}>
+                                                <span className="truncate pr-4">{li.name}</span>
+                                                <span className="text-indigo-600 font-black">${Number(li.price).toFixed(2)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                <button type="submit" disabled={aiProcessing} className={`w-full py-6 text-white rounded-[2.5rem] font-black uppercase text-sm tracking-widest shadow-2xl transition-all ${aiProcessing ? 'bg-slate-300 cursor-not-allowed grayscale' : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700 hover:translate-y-[-2px] active:scale-95'}`}>
+                                    {aiProcessing ? 'Processing...' : 'Securely Commit'}
+                                </button>
+                            </form>
                         </div>
                     )}
                 </div>
             );
         };
 
-        const SidebarLink = ({ active, label, onClick }) => (
-            <button onClick={onClick} className={`w-full text-left p-4 rounded-2xl font-black transition-all ${active ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-slate-500 hover:bg-slate-50'}`}>{label}</button>
-        );
-
-        const MobileNavLink = ({ active, label, onClick }) => (
-            <button onClick={onClick} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${active ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>{label}</button>
-        );
-
         const Input = ({ label, ...props }) => (
             <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{label}</label>
-                <input className="w-full p-4 bg-slate-100 border-0 rounded-xl font-bold focus:ring-2 focus:ring-indigo-500 transition-all outline-none" {...props} />
-            </div>
-        );
-
-        const StatCard = ({ title, value, sub }) => (
-            <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border shadow-sm relative overflow-hidden">
-                <div className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-2">{title}</div>
-                <div className={`text-3xl md:text-5xl font-black tracking-tight ${value < 0 ? 'text-red-500' : 'text-slate-800'}`}>${value.toFixed(2)}</div>
-                <div className="mt-4 pt-4 border-t border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">{sub}</div>
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1 tracking-widest">{label}</label>
+                <input className="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border-0 focus:ring-4 focus:ring-indigo-50 transition-all placeholder:text-slate-300 text-slate-800" {...props} />
             </div>
         );
 
