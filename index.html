@@ -42,7 +42,7 @@
         };
 
         const DEFAULT_APP_ID = 'home-accounting-2463d';
-        const FALLBACK_API_KEY = ""; // Optional hardcoded fallback
+        const FALLBACK_API_KEY = firebaseConfig.apiKey || ""; // Uses project key unless overridden at runtime
         const runtimeConfig = (() => {
             const params = new URLSearchParams(window.location.search);
             const urlApiKey = params.get('apiKey');
@@ -75,6 +75,7 @@
             const [transactions, setTransactions] = React.useState([]);
             const [deposits, setDeposits] = React.useState([]);
             const [allLineItems, setAllLineItems] = React.useState([]);
+            const [utilityBills, setUtilityBills] = React.useState([]);
             const [loading, setLoading] = React.useState(true);
             const [aiProcessing, setAiProcessing] = React.useState(false);
             const [errorMsg, setErrorMsg] = React.useState(null);
@@ -91,6 +92,14 @@
             const [formData, setFormData] = React.useState({
                 date: new Date().toISOString().split('T')[0],
                 description: '', amount: '', category: 'Groceries', contributor: '', targetBill: '', receiptUrl: '', shopName: '', lineItems: []
+            });
+
+            const [utilityForm, setUtilityForm] = React.useState({
+                name: '',
+                amount: '',
+                people: '2',
+                paid: '',
+                dueDate: new Date().toISOString().split('T')[0]
             });
 
             React.useEffect(() => {
@@ -115,12 +124,14 @@
                 const transPath = `artifacts/${appId}/public/data/transactions_${activeLedger}`;
                 const depPath = `artifacts/${appId}/public/data/deposits_${activeLedger}`;
                 const itemsPath = `artifacts/${appId}/public/data/line_items_${activeLedger}`;
+                const utilityPath = `artifacts/${appId}/public/data/utility_bills_${activeLedger}`;
 
                 const unsubT = db.collection(transPath).onSnapshot(s => setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'expense' }))), err => console.error(err));
                 const unsubD = db.collection(depPath).onSnapshot(s => setDeposits(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'deposit' }))), err => console.error(err));
                 const unsubI = db.collection(itemsPath).onSnapshot(s => setAllLineItems(s.docs.map(d => ({ ...d.data(), id: d.id }))), err => console.error(err));
+                const unsubU = db.collection(utilityPath).onSnapshot(s => setUtilityBills(s.docs.map(d => ({ ...d.data(), id: d.id }))), err => console.error(err));
 
-                return () => { unsubT(); unsubD(); unsubI(); };
+                return () => { unsubT(); unsubD(); unsubI(); unsubU(); };
             }, [user, activeLedger]);
 
             const stats = React.useMemo(() => {
@@ -291,6 +302,59 @@
                 setFormData({ date: new Date().toISOString().split('T')[0], description: '', amount: '', category: 'Groceries', contributor: '', targetBill: '', receiptUrl: '', shopName: '', lineItems: [] });
             };
 
+
+            const addUtilityBill = async (e) => {
+                e.preventDefault();
+                const db = firebase.firestore();
+                const data = {
+                    name: utilityForm.name || 'Utility Bill',
+                    amount: Number(utilityForm.amount) || 0,
+                    people: Math.max(1, Number(utilityForm.people) || 1),
+                    paid: Number(utilityForm.paid) || 0,
+                    dueDate: utilityForm.dueDate,
+                    ts: Date.now()
+                };
+                await db.collection(`artifacts/${appId}/public/data/utility_bills_${activeLedger}`).add(data);
+                setUtilityForm({ name: '', amount: '', people: '2', paid: '', dueDate: new Date().toISOString().split('T')[0] });
+            };
+
+            const addUtilityPayment = async (billId, amount) => {
+                const payment = Number(amount);
+                if (!payment) return;
+                const db = firebase.firestore();
+                const ref = db.collection(`artifacts/${appId}/public/data/utility_bills_${activeLedger}`).doc(billId);
+                await db.runTransaction(async (tx) => {
+                    const snap = await tx.get(ref);
+                    if (!snap.exists) return;
+                    const current = snap.data();
+                    const nextPaid = (Number(current.paid) || 0) + payment;
+                    tx.update(ref, { paid: nextPaid });
+                });
+            };
+
+            const utilitySummary = React.useMemo(() => {
+                const rows = utilityBills
+                    .slice()
+                    .sort((a, b) => new Date(a.dueDate || 0) - new Date(b.dueDate || 0))
+                    .map(bill => {
+                        const total = Number(bill.amount) || 0;
+                        const paid = Number(bill.paid) || 0;
+                        const people = Math.max(1, Number(bill.people) || 1);
+                        const remaining = Math.max(0, total - paid);
+                        return {
+                            ...bill,
+                            total,
+                            paid,
+                            people,
+                            remaining,
+                            sharePerPerson: total / people,
+                            remainingPerPerson: remaining / people
+                        };
+                    });
+                const totalRemaining = rows.reduce((acc, row) => acc + row.remaining, 0);
+                return { rows, totalRemaining };
+            }, [utilityBills]);
+
             const filteredHistory = React.useMemo(() => {
                 const combined = [...transactions, ...deposits].sort((a,b) => new Date(b.date) - new Date(a.date));
                 if (!searchTerm) return combined;
@@ -407,6 +471,48 @@
                                                 <div key={t.id} className="flex justify-between items-center group/item">
                                                     <span className="font-bold text-sm text-slate-700">{t.description}</span>
                                                     <span className="font-black text-indigo-600 text-sm group-hover/item:scale-110 transition-transform">${stats.billProgress[t.id].remaining.toFixed(2)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Utility Splitter</h3>
+                                            <span className="text-xs font-black text-indigo-600">Remaining ${utilitySummary.totalRemaining.toFixed(2)}</span>
+                                        </div>
+                                        <form onSubmit={addUtilityBill} className="grid grid-cols-2 gap-3">
+                                            <input className="col-span-2 p-3 bg-slate-50 rounded-xl font-bold text-sm" placeholder="Utility name (Electricity, Water...)" value={utilityForm.name} onChange={e=>setUtilityForm(prev=>({...prev, name:e.target.value}))} required />
+                                            <input className="p-3 bg-slate-50 rounded-xl font-bold text-sm" type="number" step="0.01" placeholder="Total bill" value={utilityForm.amount} onChange={e=>setUtilityForm(prev=>({...prev, amount:e.target.value}))} required />
+                                            <input className="p-3 bg-slate-50 rounded-xl font-bold text-sm" type="number" min="1" placeholder="People" value={utilityForm.people} onChange={e=>setUtilityForm(prev=>({...prev, people:e.target.value}))} required />
+                                            <input className="p-3 bg-slate-50 rounded-xl font-bold text-sm" type="number" step="0.01" placeholder="Paid so far" value={utilityForm.paid} onChange={e=>setUtilityForm(prev=>({...prev, paid:e.target.value}))} />
+                                            <input className="p-3 bg-slate-50 rounded-xl font-bold text-sm" type="date" value={utilityForm.dueDate} onChange={e=>setUtilityForm(prev=>({...prev, dueDate:e.target.value}))} />
+                                            <button type="submit" className="col-span-2 bg-indigo-600 text-white py-3 rounded-xl font-black text-[10px] uppercase">Save Utility Bill</button>
+                                        </form>
+                                    </div>
+                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Utility Balances</h3>
+                                        <div className="space-y-3 max-h-80 overflow-y-auto no-scrollbar">
+                                            {!utilitySummary.rows.length && <p className="text-xs text-slate-300 font-bold uppercase italic">No utility bills yet</p>}
+                                            {utilitySummary.rows.map(bill => (
+                                                <div key={bill.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                                                    <div className="flex justify-between items-center">
+                                                        <div>
+                                                            <div className="font-black text-slate-800">{bill.name}</div>
+                                                            <div className="text-[10px] uppercase font-bold text-slate-400">Due {bill.dueDate || 'N/A'} · {bill.people} people</div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="font-black text-indigo-600">${bill.remaining.toFixed(2)} left</div>
+                                                            <div className="text-[10px] font-bold text-slate-400">${bill.remainingPerPerson.toFixed(2)} each</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-3 text-[11px] font-bold text-slate-500">Paid ${bill.paid.toFixed(2)} / ${bill.total.toFixed(2)} · Share ${bill.sharePerPerson.toFixed(2)} each</div>
+                                                    <div className="mt-3 flex gap-2">
+                                                        <button type="button" onClick={() => addUtilityPayment(bill.id, bill.sharePerPerson)} className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-black uppercase">+1 Share Paid</button>
+                                                        <button type="button" onClick={() => addUtilityPayment(bill.id, bill.remaining)} className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-black uppercase">Mark Settled</button>
+                                                    </div>
                                                 </div>
                                             ))}
                                         </div>
