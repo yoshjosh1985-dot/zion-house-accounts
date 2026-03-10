@@ -1,0 +1,429 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, query, updateDoc } from 'firebase/firestore';
+import { 
+  LayoutDashboard, Receipt, Plus, FileText, Trash2, 
+  X, Wallet, ArrowUpCircle, Search, Loader2, Camera, ShoppingBag, 
+  TrendingUp, CreditCard, Activity, ChevronRight, BarChart3, Store, Tag, Download, Calendar, Filter, CheckCircle2, AlertCircle
+} from 'lucide-react';
+
+// --- Firebase Initialization ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'housebank-v4-final';
+const apiKey = ""; 
+
+// --- Constants ---
+const LEDGERS = { HOUSEHOLD: 'household', FIXED_COSTS: 'fixed_costs' };
+const CATEGORIES = {
+  [LEDGERS.HOUSEHOLD]: ['Groceries', 'Dining Out', 'Household Items', 'Entertainment', 'Transport', 'Healthcare', 'Gifts', 'Miscellaneous'],
+  [LEDGERS.FIXED_COSTS]: ['Rent/Mortgage', 'Electricity', 'Water/Gas', 'Internet', 'Insurance', 'Phone Bill', 'Subscriptions', 'Council Rates']
+};
+
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('dashboard');
+  const [activeLedger, setActiveLedger] = useState(LEDGERS.HOUSEHOLD);
+  const [transactions, setTransactions] = useState([]);
+  const [deposits, setDeposits] = useState([]);
+  
+  const [isAdding, setIsAdding] = useState(false);
+  const [isAddingDeposit, setIsAddingDeposit] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [aiProcessing, setAiProcessing] = useState(false);
+  const [aiStatus, setAiStatus] = useState({ type: null, message: '' }); // 'success' or 'error'
+  const [globalSearch, setGlobalSearch] = useState('');
+
+  // Reporting Options State
+  const [reportOptions, setReportOptions] = useState({
+    dateRange: 'month',
+    startDate: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
+    category: 'All',
+    merchant: 'All'
+  });
+
+  const [formData, setFormData] = useState({
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    amount: '',
+    category: CATEGORIES[LEDGERS.HOUSEHOLD][0],
+  });
+
+  // --- External Library Loader (jspdf) ---
+  const [pdfReady, setPdfReady] = useState(false);
+
+  useEffect(() => {
+    const loadScript = (src) => {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) return resolve();
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    };
+
+    Promise.all([
+      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js')
+    ]).then(() => {
+      setPdfReady(true);
+    }).catch(err => console.error("PDF Library failed to load", err));
+  }, []);
+
+  // --- Auth ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) { console.error(err); }
+    };
+    initAuth();
+    const unsub = onAuthStateChanged(auth, (u) => { setUser(u); setLoading(false); });
+    return () => unsub();
+  }, []);
+
+  // --- Data Sync ---
+  useEffect(() => {
+    if (!user) return;
+    const tPath = collection(db, 'artifacts', appId, 'public', 'data', `transactions_${activeLedger}`);
+    const dPath = collection(db, 'artifacts', appId, 'public', 'data', `deposits_${activeLedger}`);
+
+    const unsubT = onSnapshot(tPath, (s) => setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'expense' }))), (err) => console.error(err));
+    const unsubD = onSnapshot(dPath, (s) => setDeposits(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'deposit' }))), (err) => console.error(err));
+
+    return () => { unsubT(); unsubD(); };
+  }, [user, activeLedger]);
+
+  // --- AI Receipt Scanner ---
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setAiProcessing(true);
+    setAiStatus({ type: null, message: '' });
+
+    try {
+      const reader = new FileReader();
+      const b64 = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const prompt = "Analyze this receipt. Return ONLY a JSON object with: { \"merchant\": \"store name\", \"amount\": number, \"date\": \"YYYY-MM-DD\" }";
+      
+      const payload = {
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: file.type, data: b64 } }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      };
+
+      // Exponential backoff helper for Gemini API
+      const callGemini = async (retries = 0) => {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (response.status === 429 && retries < 5) {
+            await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
+            return callGemini(retries + 1);
+          }
+          if (!response.ok) throw new Error(`API Error: ${response.status}`);
+          return await response.json();
+        } catch (err) {
+          if (retries < 5) {
+            await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
+            return callGemini(retries + 1);
+          }
+          throw err;
+        }
+      };
+
+      const result = await callGemini();
+      const textResponse = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!textResponse) throw new Error("AI returned no data.");
+
+      const parsed = JSON.parse(textResponse);
+      
+      setFormData(prev => ({
+        ...prev,
+        description: parsed.merchant || "Unknown Merchant",
+        amount: parsed.amount || "",
+        date: parsed.date || prev.date
+      }));
+
+      setAiStatus({ type: 'success', message: 'Receipt scanned successfully!' });
+    } catch (err) {
+      console.error("AI Scanner Error:", err);
+      setAiStatus({ type: 'error', message: 'Error scanning receipt. Please enter manually.' });
+    } finally {
+      setAiProcessing(false);
+    }
+  };
+
+  // --- Logic Helpers ---
+  const reportData = useMemo(() => {
+    return transactions.filter(t => {
+      const tDate = new Date(t.date);
+      const start = new Date(reportOptions.startDate);
+      const end = new Date(reportOptions.endDate);
+      end.setHours(23, 59, 59);
+
+      const dateMatch = (tDate >= start && tDate <= end);
+      const catMatch = reportOptions.category === 'All' || t.category === reportOptions.category;
+      const mercMatch = reportOptions.merchant === 'All' || t.description === reportOptions.merchant;
+
+      return dateMatch && catMatch && mercMatch;
+    }).sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [transactions, reportOptions]);
+
+  const stats = useMemo(() => {
+    const expenseTotal = reportData.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+    const depositTotal = deposits.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+    return { balance: depositTotal - expenseTotal, totalExpenses: expenseTotal, count: reportData.length };
+  }, [reportData, deposits]);
+
+  const uniqueMerchants = useMemo(() => ['All', ...new Set(transactions.map(t => t.description))].sort(), [transactions]);
+
+  const generateDetailedPDF = () => {
+    if (!pdfReady || !window.jspdf) return;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(22);
+    doc.setTextColor(79, 70, 229);
+    doc.text("Premium Financial Report", 14, 22);
+    doc.save(`Report_${activeLedger}.pdf`);
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white font-black text-xs uppercase tracking-[0.3em]">Loading System...</div>;
+
+  return (
+    <div className="flex h-screen bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
+      {/* Sidebar */}
+      <aside className="w-80 bg-white border-r flex flex-col shrink-0">
+        <div className="flex-1 overflow-y-auto p-8 no-scrollbar">
+          <div className="flex items-center space-x-3 mb-10">
+            <div className="bg-indigo-600 p-2.5 rounded-2xl text-white shadow-xl shadow-indigo-100"><Wallet size={24} /></div>
+            <div>
+              <h1 className="text-xl font-black tracking-tighter uppercase leading-none">HouseBank</h1>
+              <span className="text-[9px] font-black text-indigo-500 uppercase tracking-[0.2em]">Premium AI 4.0</span>
+            </div>
+          </div>
+          
+          <nav className="space-y-1">
+            <SidebarBtn active={view === 'dashboard'} icon={LayoutDashboard} label="Dashboard" onClick={() => setView('dashboard')} />
+            <SidebarBtn active={view === 'ledger'} icon={Receipt} label="Ledger" onClick={() => setView('ledger')} />
+            <SidebarBtn active={view === 'reports'} icon={BarChart3} label="Reports" onClick={() => setView('reports')} />
+            
+            <div className="pt-8 pb-3 text-[10px] font-black uppercase tracking-widest text-slate-400 px-4">Ledgers</div>
+            <div className="space-y-2">
+              <LedgerTab active={activeLedger === LEDGERS.HOUSEHOLD} label="Household" onClick={() => setActiveLedger(LEDGERS.HOUSEHOLD)} />
+              <LedgerTab active={activeLedger === LEDGERS.FIXED_COSTS} label="Fixed Costs" onClick={() => setActiveLedger(LEDGERS.FIXED_COSTS)} />
+            </div>
+          </nav>
+        </div>
+        
+        <div className="shrink-0 p-8 border-t bg-slate-50/50">
+          <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-xl transition-all hover:scale-[1.02]">
+             <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Spending</p>
+             <p className="text-2xl font-black text-red-400">
+               ${stats.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+             </p>
+          </div>
+        </div>
+      </aside>
+
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <header className="h-24 bg-white border-b flex items-center justify-between px-10 shrink-0">
+          <div className="flex items-center space-x-4">
+             <div className="bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100">
+                <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">{activeLedger}</span>
+             </div>
+          </div>
+          <div className="flex items-center space-x-3">
+            <button onClick={() => setIsAddingDeposit(true)} className="bg-emerald-50 text-emerald-600 p-3 rounded-xl hover:bg-emerald-100 transition-all"><ArrowUpCircle size={20} /></button>
+            <button onClick={() => { setFormData({...formData, amount: '', description: ''}); setIsAdding(true); setAiStatus({type:null, message:''}); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center space-x-2">
+              <Plus size={16} strokeWidth={3} /><span>New Record</span>
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-10 no-scrollbar">
+           {view === 'dashboard' && (
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-10 animate-in fade-in slide-in-from-bottom-4">
+                <StatCard label="Total Expense" value={stats.totalExpenses} icon={TrendingUp} color="indigo" />
+                <StatCard label="Total Income" value={deposits.reduce((a,c) => a+Number(c.amount), 0)} icon={CreditCard} color="emerald" />
+                <StatCard label="Transactions" value={stats.count} icon={Activity} color="amber" unit="" />
+             </div>
+           )}
+
+           <div className="bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
+             <div className="p-8 border-b flex justify-between items-center bg-slate-50/50">
+               <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Transaction History</h3>
+             </div>
+             <table className="w-full text-left">
+                <thead className="bg-white text-[10px] font-black uppercase tracking-widest text-slate-400 border-b">
+                  <tr>
+                    <th className="px-8 py-4">Date</th>
+                    <th className="px-8 py-4">Description</th>
+                    <th className="px-8 py-4">Category</th>
+                    <th className="px-8 py-4 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {reportData.map(i => (
+                    <tr key={i.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-8 py-4 text-[11px] font-bold text-slate-400 italic">{i.date}</td>
+                      <td className="px-8 py-4 text-[12px] font-black text-slate-800 uppercase tracking-tighter">{i.description}</td>
+                      <td className="px-8 py-4"><span className="px-2 py-1 bg-slate-100 rounded text-[9px] font-black uppercase text-slate-500">{i.category}</span></td>
+                      <td className="px-8 py-4 text-right font-black text-red-500">${Number(i.amount).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+             </table>
+           </div>
+        </div>
+      </main>
+
+      {/* MODALS */}
+      {isAdding && (
+        <Modal title="Add Expense" onClose={() => setIsAdding(false)}>
+           <div className="space-y-6">
+              <div className={`h-32 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all ${aiProcessing ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200 hover:border-indigo-400'} relative overflow-hidden`}>
+                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={handleFileUpload} disabled={aiProcessing} />
+                {aiProcessing ? (
+                  <div className="flex flex-col items-center">
+                    <Loader2 className="animate-spin text-indigo-500 mb-2" size={24} />
+                    <span className="text-[10px] font-black text-indigo-500 uppercase">AI Processing Receipt...</span>
+                  </div>
+                ) : (
+                  <>
+                    <Camera className="text-slate-400 mb-2" size={28} />
+                    <span className="text-[10px] font-black uppercase text-slate-400 text-center px-4">Click or Drop Receipt for AI Scan</span>
+                  </>
+                )}
+              </div>
+
+              {aiStatus.message && (
+                <div className={`p-4 rounded-2xl flex items-center space-x-3 text-[10px] font-black uppercase tracking-wide ${aiStatus.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                  {aiStatus.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                  <span>{aiStatus.message}</span>
+                </div>
+              )}
+              
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', `transactions_${activeLedger}`), {
+                  ...formData, amount: parseFloat(formData.amount), ts: Date.now(), userId: user?.uid, type: 'expense'
+                });
+                setIsAdding(false);
+              }} className="space-y-4">
+                 <div className="grid grid-cols-2 gap-4">
+                    <Input label="Date" type="date" value={formData.date} onChange={v => setFormData({...formData, date: v})} />
+                    <Input label="Amount ($)" type="number" step="0.01" value={formData.amount} onChange={v => setFormData({...formData, amount: v})} />
+                 </div>
+                 <Input label="Merchant" value={formData.description} onChange={v => setFormData({...formData, description: v})} />
+                 <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase text-slate-400 px-2">Category</label>
+                    <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full p-4 bg-slate-50 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-indigo-100 border-none transition-all">
+                      {CATEGORIES[activeLedger].map(c => <option key={c}>{c}</option>)}
+                    </select>
+                 </div>
+                 <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl">Save Expense</button>
+              </form>
+           </div>
+        </Modal>
+      )}
+
+      {isAddingDeposit && (
+        <Modal title="Log Income" onClose={() => setIsAddingDeposit(false)}>
+           <form onSubmit={async (e) => {
+             e.preventDefault();
+             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', `deposits_${activeLedger}`), {
+               amount: parseFloat(e.target.amount.value) || 0,
+               description: e.target.desc.value,
+               date: new Date().toISOString().split('T')[0],
+               ts: Date.now(), userId: user?.uid, type: 'deposit'
+             });
+             setIsAddingDeposit(false);
+           }} className="space-y-4">
+              <Input name="amount" label="Amount ($)" type="number" step="0.01" required />
+              <Input name="desc" label="Source" required />
+              <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px]">Log Income</button>
+           </form>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// --- Components ---
+const SidebarBtn = ({ active, icon: Icon, label, onClick }) => (
+  <button onClick={onClick} className={`flex items-center space-x-3 w-full p-3.5 rounded-xl transition-all ${active ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50 font-bold'}`}>
+    <Icon size={16} /> <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
+  </button>
+);
+
+const LedgerTab = ({ active, label, onClick }) => (
+  <button onClick={onClick} className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition-all ${active ? 'border-indigo-600 bg-indigo-50/20' : 'border-transparent bg-slate-50 font-bold text-slate-500'}`}>
+     <span className="text-[10px] font-black uppercase">{label}</span>
+     {active && <ChevronRight size={12} className="text-indigo-600" />}
+  </button>
+);
+
+const StatCard = ({ label, value, icon: Icon, color, unit = "$" }) => {
+  const colors = { indigo: 'bg-indigo-50 text-indigo-600', emerald: 'bg-emerald-50 text-emerald-600', amber: 'bg-amber-50 text-amber-600' };
+  return (
+    <div className="bg-white p-6 rounded-3xl border shadow-sm flex items-center space-x-5">
+       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${colors[color]}`}><Icon size={24} /></div>
+       <div>
+         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
+         <p className="text-xl font-black tracking-tighter">{unit}{value.toLocaleString()}</p>
+       </div>
+    </div>
+  );
+};
+
+const Modal = ({ title, children, onClose }) => (
+  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+      <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">{title}</h3>
+        <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-all text-slate-400"><X size={18}/></button>
+      </div>
+      <div className="p-8">{children}</div>
+    </div>
+  </div>
+);
+
+const Input = ({ label, onChange, ...props }) => (
+  <div className="space-y-1">
+    <label className="text-[9px] font-black uppercase text-slate-400 px-2">{label}</label>
+    <input 
+      {...props} 
+      onChange={e => onChange ? onChange(e.target.value) : null} 
+      className="w-full p-4 bg-slate-50 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-indigo-100 border-none transition-all" 
+    />
+  </div>
+);
+
+export default App;
