@@ -43,7 +43,7 @@
         };
 
         const DEFAULT_APP_ID = 'home-accounting-2463d';
-        const FALLBACK_API_KEY = firebaseConfig.apiKey || ""; // Uses project key unless overridden at runtime
+        const FALLBACK_API_KEY = ""; // Gemini key must be provided via URL/localStorage/window.__apiKey
         const runtimeConfig = (() => {
             const params = new URLSearchParams(window.location.search);
             const urlApiKey = params.get('apiKey');
@@ -204,7 +204,7 @@
                             '{"shopName":"", "description":"", "amount":0, "category":"Groceries", "items":[{"name":"", "price":0, "category":""}]}'
                         ].join("\n");
 
-                        const models = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"];
+                        const models = ["gemini-1.5-flash-latest", "gemini-2.0-flash-exp"];
                         let lastError = "";
 
                         for (const model of models) {
@@ -225,6 +225,9 @@
 
                                 if (response.ok) return response.json();
                                 const errorBody = await response.text();
+                                if (response.status === 403) {
+                                    throw new Error("Gemini API access denied (403). Add a valid Gemini API key with ?apiKey=YOUR_GEMINI_KEY and make sure Generative Language API is enabled in Google Cloud.");
+                                }
                                 lastError = `${model} failed (${response.status}) ${errorBody.slice(0, 160)}`;
                                 await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 600));
                             }
@@ -442,7 +445,25 @@
                     return acc;
                 }, {})).sort((a, b) => new Date(a[0]) - new Date(b[0]));
 
-                return { rows: inDateRange.sort((a,b)=>new Date(b.date)-new Date(a.date)), totalSpend, categoryTotals, shopTotals, topItems, dailyTotals };
+                const monthlyTotals = Object.entries(inDateRange.reduce((acc, t) => {
+                    const monthKey = (t.date || '').slice(0, 7) || 'unknown';
+                    acc[monthKey] = (acc[monthKey] || 0) + (Number(t.amount) || 0);
+                    return acc;
+                }, {})).sort((a, b) => a[0].localeCompare(b[0]));
+
+                const rangeDays = reportFilters.startDate && reportFilters.endDate
+                    ? Math.max(1, Math.ceil((new Date(reportFilters.endDate) - new Date(reportFilters.startDate)) / 86400000) + 1)
+                    : 30;
+                const prevEndDate = reportFilters.startDate ? new Date(new Date(reportFilters.startDate).getTime() - 86400000) : new Date();
+                const prevStartDate = new Date(prevEndDate.getTime() - (rangeDays - 1) * 86400000);
+                const prevStart = prevStartDate.toISOString().slice(0, 10);
+                const prevEnd = prevEndDate.toISOString().slice(0, 10);
+                const previousPeriodTotal = transactions.filter(t => t.date && t.date >= prevStart && t.date <= prevEnd)
+                    .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+                const trendDelta = totalSpend - previousPeriodTotal;
+                const trendPct = previousPeriodTotal > 0 ? (trendDelta / previousPeriodTotal) * 100 : null;
+
+                return { rows: inDateRange.sort((a,b)=>new Date(b.date)-new Date(a.date)), totalSpend, categoryTotals, shopTotals, topItems, dailyTotals, monthlyTotals, previousPeriodTotal, trendDelta, trendPct };
             }, [transactions, allLineItems, reportFilters]);
 
             const applyDatePreset = (preset) => {
@@ -534,9 +555,9 @@
 
                         {!apiKey && (
                             <div className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl text-xs font-bold">
-                                AI receipt scan needs a Gemini key. Open this deployed page with
-                                <span className="font-black"> ?apiKey=YOUR_KEY </span>
-                                (saved in this browser), e.g. <span className="font-black">.../index.html?apiKey=AIza...</span>
+                                AI receipt scan needs a valid Gemini key. Open this deployed page with
+                                <span className="font-black"> ?apiKey=YOUR_GEMINI_KEY </span>
+                                and ensure Generative Language API is enabled for that key's project.
                             </div>
                         )}
 
@@ -748,6 +769,34 @@
                                         <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Top Receipt Items</h3>
                                         {spendReport.topItems.map(item => <div key={item.name} className="flex justify-between font-bold text-sm"><span>{item.name} <span className="text-[10px] text-slate-400">({item.count}x)</span></span><span className="text-indigo-600">${item.spend.toFixed(2)}</span></div>)}
                                         {!spendReport.topItems.length && <p className="text-[11px] text-slate-400 font-bold uppercase">Scan receipts to see item detail</p>}
+                                    </div>
+                                </div>
+
+
+                                <div className="grid md:grid-cols-2 gap-4">
+                                    <div className="bg-white border rounded-[2rem] p-6 space-y-3">
+                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Spend Trend vs Previous Period</h3>
+                                        <div className="text-sm font-bold text-slate-600">Current: <span className="text-slate-900">${spendReport.totalSpend.toFixed(2)}</span></div>
+                                        <div className="text-sm font-bold text-slate-600">Previous: <span className="text-slate-900">${spendReport.previousPeriodTotal.toFixed(2)}</span></div>
+                                        <div className={`text-sm font-black ${spendReport.trendDelta > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                            {spendReport.trendDelta > 0 ? '▲' : '▼'} ${Math.abs(spendReport.trendDelta).toFixed(2)}
+                                            {spendReport.trendPct !== null ? ` (${Math.abs(spendReport.trendPct).toFixed(1)}%)` : ''}
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 font-bold uppercase">Compare if shopping/bills are up or down</p>
+                                    </div>
+                                    <div className="bg-white border rounded-[2rem] p-6 space-y-3">
+                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Monthly Spend Graph</h3>
+                                        <div className="space-y-2">
+                                            {spendReport.monthlyTotals.map(([month, total]) => {
+                                                const max = Math.max(...spendReport.monthlyTotals.map(([, t]) => t), 1);
+                                                const width = Math.max(8, (total / max) * 100);
+                                                return <div key={month} className="space-y-1">
+                                                    <div className="flex justify-between text-[11px] font-bold text-slate-600"><span>{month}</span><span>${total.toFixed(2)}</span></div>
+                                                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 rounded-full" style={{width: `${width}%`}}></div></div>
+                                                </div>;
+                                            })}
+                                            {!spendReport.monthlyTotals.length && <p className="text-[11px] text-slate-400 font-bold uppercase">No trend data available</p>}
+                                        </div>
                                     </div>
                                 </div>
 
