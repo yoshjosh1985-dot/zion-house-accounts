@@ -10,8 +10,6 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Use Lucide React instead of core Lucide for better compatibility -->
-    <script src="https://unpkg.com/lucide-react@0.344.0/dist/umd/lucide-react.min.js"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
@@ -42,6 +40,18 @@
         .animate-infinite-loading {
             animation: infinite-loading 1.5s infinite linear;
         }
+
+        @media print {
+            body { background-color: white !important; padding: 0 !important; margin: 0 !important; }
+            aside, header, .no-print { display: none !important; }
+            main { overflow: visible !important; height: auto !important; display: block !important; padding: 0 !important; margin: 0 !important; }
+            .print-full-width { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 20px !important; border: none !important; box-shadow: none !important; }
+            .print-shadow-none { box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
+            .no-scrollbar { overflow: visible !important; }
+            * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .grid { display: block !important; }
+            .grid > div { margin-bottom: 2rem; page-break-inside: avoid; }
+        }
     </style>
 </head>
 <body>
@@ -65,19 +75,51 @@
             [LEDGERS.FIXED_COSTS]: ['Rent/Mortgage', 'Electricity', 'Water/Gas', 'Internet', 'Insurance', 'Phone Bill', 'Subscriptions', 'Council Rates']
         };
 
-        /**
-         * Robust Icon Component
-         * Mapping string names to Lucide components provided by lucide-react UMD
-         */
+        // Custom Icon Component
         const Icon = ({ name, size = 16, className = "", strokeWidth = 2 }) => {
-            // In the UMD build, icons are under LucideReact
-            const LucideIcon = window.LucideReact ? window.LucideReact[name] : null;
+            const icons = {
+                Wallet: <React.Fragment><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" /></React.Fragment>,
+                LayoutDashboard: <React.Fragment><rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" /></React.Fragment>,
+                Receipt: <React.Fragment><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1-2-1Z" /><path d="M16 8h-6" /><path d="M16 12h-6" /><path d="M16 16h-6" /></React.Fragment>,
+                ShoppingBag: <React.Fragment><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></React.Fragment>,
+                BarChart3: <React.Fragment><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></React.Fragment>,
+                Search: <React.Fragment><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></React.Fragment>,
+                Plus: <React.Fragment><path d="M12 5v14M5 12h14" /></React.Fragment>,
+                ArrowUpCircle: <React.Fragment><circle cx="12" cy="12" r="10" /><path d="m16 12-4-4-4 4M12 16V8" /></React.Fragment>,
+                ArrowDownLeft: <React.Fragment><path d="M17 7 7 17M17 17H7V7" /></React.Fragment>,
+                TrendingUp: <React.Fragment><path d="m22 7-8.5 8.5-5-5L2 17" /><path d="M16 7h6v6" /></React.Fragment>,
+                CreditCard: <React.Fragment><rect width="20" height="14" x="2" y="5" rx="2" /><line x1="2" x2="22" y1="10" y2="10" /></React.Fragment>,
+                Activity: <React.Fragment><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></React.Fragment>,
+                Trash2: <React.Fragment><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></React.Fragment>,
+                X: <React.Fragment><path d="M18 6 6 18M6 6l12 12" /></React.Fragment>,
+                CheckCircle2: <React.Fragment><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" /><path d="m9 12 2 2 4-4" /></React.Fragment>,
+                Circle: <React.Fragment><circle cx="12" cy="12" r="10" /></React.Fragment>,
+                Printer: <React.Fragment><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect width="12" height="8" x="6" y="14" /></React.Fragment>,
+                Filter: <React.Fragment><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></React.Fragment>,
+                ChevronDown: <React.Fragment><path d="m6 9 6 6 6-6" /></React.Fragment>,
+                ChevronRight: <React.Fragment><path d="m9 18 6-6-6-6" /></React.Fragment>,
+                Store: <React.Fragment><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7" /><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4" /><path d="M2 7h20" /><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7" /></React.Fragment>,
+                Tag: <React.Fragment><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z" /><line x1="7" x2="7.01" y1="7" y2="7" /></React.Fragment>,
+                Camera: <React.Fragment><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /><circle cx="12" cy="13" r="3" /></React.Fragment>,
+                Loader2: <React.Fragment><path d="M12 2v4" /><path d="m16.2 7.8 2.9-2.9" /><path d="M18 12h4" /><path d="m16.2 16.2 2.9 2.9" /><path d="M12 18v4" /><path d="m7.8 16.2-2.9 2.9" /><path d="M6 12H2" /><path d="m7.8 7.8-2.9-2.9" /></React.Fragment>
+            };
 
-            if (!LucideIcon) {
-                return <span style={{ width: size, height: size, display: 'inline-block' }} className={className} />;
-            }
-
-            return <LucideIcon size={size} className={className} strokeWidth={strokeWidth} />;
+            return (
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width={size}
+                    height={size}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={strokeWidth}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={className}
+                >
+                    {icons[name] || null}
+                </svg>
+            );
         };
 
         const App = () => {
@@ -94,6 +136,9 @@
             const [aiProcessing, setAiProcessing] = useState(false);
             const [scanError, setScanError] = useState(null);
             const [globalSearch, setGlobalSearch] = useState('');
+            
+            const [timeFilter, setTimeFilter] = useState('all');
+            const [focusEntity, setFocusEntity] = useState('all');
 
             const [billSplits, setBillSplits] = useState([{ person: '', amount: '', paid: false }]);
             const [formData, setFormData] = useState({
@@ -104,7 +149,6 @@
                 items: []
             });
 
-            // Firebase Access
             const { 
                 initializeApp, getAuth, onAuthStateChanged, signInAnonymously, 
                 signInWithCustomToken, getFirestore, collection, onSnapshot, 
@@ -119,7 +163,6 @@
             const auth = useMemo(() => getAuth(app), [app]);
             const db = useMemo(() => getFirestore(app), [app]);
 
-            // Auth Initialization
             useEffect(() => {
                 const initAuth = async () => {
                     try {
@@ -138,7 +181,6 @@
                 return () => unsub();
             }, [auth]);
 
-            // Data Sync
             useEffect(() => {
                 if (!user) return;
 
@@ -183,24 +225,65 @@
             }, [transactions, deposits]);
 
             const reports = useMemo(() => {
-                const shopMap = {};
-                const itemMap = {};
-                lineItems.forEach(item => {
-                    const shop = item.merchant || 'Unknown Shop';
-                    if (!shopMap[shop]) shopMap[shop] = { total: 0, count: 0 };
-                    shopMap[shop].total += (Number(item.price) || 0);
-                    shopMap[shop].count += 1;
+                const now = new Date();
+                
+                const filterDate = (dateStr) => {
+                    if (timeFilter === 'all') return true;
+                    if (!dateStr) return false;
+                    const d = new Date(dateStr);
+                    if (timeFilter === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                    if (timeFilter === 'year') return d.getFullYear() === now.getFullYear();
+                    return true;
+                };
 
+                const filterEntity = (desc) => {
+                    if (focusEntity === 'all') return true;
+                    return desc === focusEntity;
+                };
+
+                const repsTrans = transactions.filter(t => filterDate(t.date) && filterEntity(t.description));
+                const repsDeps = deposits.filter(d => filterDate(d.date) && filterEntity(d.description));
+                const repsItems = lineItems.filter(i => filterDate(i.date) && (focusEntity === 'all' || i.merchant === focusEntity));
+
+                const shopMap = {};
+                const creditMap = {};
+                const itemMap = {};
+
+                const allEntities = Array.from(new Set([
+                    ...transactions.map(t => t.description),
+                    ...deposits.map(d => d.description)
+                ])).filter(Boolean).sort();
+
+                repsTrans.forEach(t => {
+                    const shop = t.description || 'Unknown Shop';
+                    if (!shopMap[shop]) shopMap[shop] = { total: 0, count: 0 };
+                    shopMap[shop].total += (Number(t.amount) || 0);
+                    shopMap[shop].count += 1;
+                });
+
+                repsDeps.forEach(d => {
+                    const source = d.description || 'Unknown Source';
+                    if (!creditMap[source]) creditMap[source] = { total: 0, count: 0 };
+                    creditMap[source].total += (Number(d.amount) || 0);
+                    creditMap[source].count += 1;
+                });
+
+                repsItems.forEach(item => {
                     const name = item.name?.toLowerCase().trim() || 'Unnamed Item';
                     if (!itemMap[name]) itemMap[name] = { total: 0, count: 0 };
                     itemMap[name].total += (Number(item.price) || 0);
                     itemMap[name].count += 1;
                 });
+
                 return {
                     shops: Object.entries(shopMap).sort((a, b) => b[1].total - a[1].total),
-                    items: Object.entries(itemMap).sort((a, b) => b[1].count - a[1].count)
+                    credits: Object.entries(creditMap).sort((a, b) => b[1].total - a[1].total),
+                    items: Object.entries(itemMap).sort((a, b) => b[1].count - a[1].count),
+                    totalOut: repsTrans.reduce((a, c) => a + (Number(c.amount) || 0), 0),
+                    totalIn: repsDeps.reduce((a, c) => a + (Number(c.amount) || 0), 0),
+                    availableEntities: allEntities
                 };
-            }, [lineItems]);
+            }, [transactions, deposits, lineItems, timeFilter, focusEntity]);
 
             const handleSaveExpense = async (e) => {
                 if (e) e.preventDefault();
@@ -303,7 +386,7 @@
             return (
                 <div className="flex h-screen bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
                     {/* Sidebar */}
-                    <aside className="w-80 bg-white border-r flex flex-col shrink-0">
+                    <aside className="w-80 bg-white border-r flex flex-col shrink-0 no-print">
                         <div className="flex-1 overflow-y-auto p-8 no-scrollbar">
                             <div className="flex items-center space-x-3 mb-10">
                                 <div className="bg-indigo-600 p-2.5 rounded-2xl text-white shadow-xl shadow-indigo-100">
@@ -319,7 +402,7 @@
                                 <SidebarBtn active={view === 'dashboard'} icon="LayoutDashboard" label="Dashboard" onClick={() => setView('dashboard')} />
                                 <SidebarBtn active={view === 'ledger'} icon="Receipt" label="Ledger" onClick={() => setView('ledger')} />
                                 <SidebarBtn active={view === 'items'} icon="ShoppingBag" label="Line Items" onClick={() => setView('items')} />
-                                <SidebarBtn active={view === 'reports'} icon="BarChart3" label="Insights" onClick={() => setView('reports')} />
+                                <SidebarBtn active={view === 'reports'} icon="BarChart3" label="Insights & Reports" onClick={() => setView('reports')} />
                                 
                                 <div className="pt-8 pb-3 text-[10px] font-black uppercase tracking-widest text-slate-400 px-4">Managed Ledgers</div>
                                 <div className="space-y-2">
@@ -341,7 +424,7 @@
 
                     {/* Main */}
                     <main className="flex-1 flex flex-col overflow-hidden">
-                        <header className="h-24 bg-white border-b flex items-center justify-between px-10 shrink-0">
+                        <header className="h-24 bg-white border-b flex items-center justify-between px-10 shrink-0 no-print">
                             <div className="flex items-center space-x-4">
                                 <div className="bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100">
                                     <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">{activeLedger.replace('_', ' ')}</span>
@@ -359,7 +442,7 @@
                             </div>
                         </header>
 
-                        <div className="flex-1 overflow-y-auto p-10 no-scrollbar">
+                        <div className="flex-1 overflow-y-auto p-10 no-scrollbar print-full-width">
                             {view === 'dashboard' && (
                                 <div className="space-y-10">
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -459,35 +542,173 @@
                             )}
 
                             {view === 'reports' && (
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
-                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800 mb-8 flex items-center gap-2"><Icon name="Store" size={18}/> Top Shops</h3>
-                                        <div className="space-y-4">
-                                            {reports.shops.length > 0 ? reports.shops.map(([shop, data]) => (
-                                                <div key={shop} className="flex items-center justify-between">
-                                                    <div className="flex-1">
-                                                        <p className="text-sm font-black text-slate-800">{shop}</p>
-                                                        <div className="w-full bg-slate-50 h-1.5 rounded-full mt-2 overflow-hidden">
-                                                            <div className="bg-indigo-500 h-full" style={{ width: `${Math.min(100, (data.total / (stats.totalExpenses || 1)) * 100)}%` }}></div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right pl-6"><p className="text-sm font-black">${data.total.toFixed(2)}</p></div>
-                                                </div>
-                                            )) : <p className="text-center py-10 text-[10px] text-slate-300 font-black">Not enough data</p>}
+                                <div className="space-y-8 print-full-width">
+                                    <div className="flex flex-col gap-6 no-print">
+                                        <div className="flex flex-wrap items-center gap-4">
+                                            <div className="flex space-x-1 bg-white p-1 rounded-2xl border shadow-sm">
+                                                {['all', 'month', 'year'].map(tf => (
+                                                    <button
+                                                        key={tf}
+                                                        onClick={() => setTimeFilter(tf)}
+                                                        className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${timeFilter === tf ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}
+                                                    >
+                                                        {tf === 'all' ? 'All Time' : tf === 'month' ? 'This Month' : 'This Year'}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            <div className="flex items-center space-x-2 bg-white p-1 rounded-2xl border shadow-sm min-w-[240px]">
+                                                <div className="pl-3 text-slate-400"><Icon name="Filter" size={14}/></div>
+                                                <select 
+                                                    value={focusEntity}
+                                                    onChange={(e) => setFocusEntity(e.target.value)}
+                                                    className="w-full bg-transparent p-2 text-[10px] font-black uppercase tracking-widest text-slate-600 outline-none appearance-none cursor-pointer"
+                                                >
+                                                    <option value="all">Focus: All Entities</option>
+                                                    <optgroup label="Shops / Sources">
+                                                        {reports.availableEntities.map(ent => (
+                                                            <option key={ent} value={ent}>{ent}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                </select>
+                                                <div className="pr-2 pointer-events-none text-slate-300"><Icon name="ChevronDown" size={14}/></div>
+                                            </div>
+
+                                            <button onClick={() => window.print()} className="ml-auto flex items-center space-x-2 bg-slate-900 text-white px-8 py-3.5 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-800 transition-colors shadow-lg">
+                                                <Icon name="Printer" size={16} /> <span>Print {focusEntity !== 'all' ? 'Statement' : 'Report'}</span>
+                                            </button>
                                         </div>
+                                        
+                                        {focusEntity !== 'all' && (
+                                            <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex items-center justify-between animate-in slide-in-from-top-2">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">
+                                                    Currently focusing on: <span className="text-indigo-900">{focusEntity}</span>
+                                                </p>
+                                                <button onClick={() => setFocusEntity('all')} className="text-[10px] font-black uppercase text-indigo-400 hover:text-indigo-600">Clear Focus</button>
+                                            </div>
+                                        )}
                                     </div>
-                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
-                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800 mb-8 flex items-center gap-2"><Icon name="Tag" size={18}/> Top Bought Items</h3>
-                                        <div className="space-y-4">
-                                            {reports.items.length > 0 ? reports.items.slice(0, 10).map(([item, data]) => (
-                                                <div key={item} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 transition-colors">
-                                                    <p className="text-sm font-black text-slate-800 capitalize">{item}</p>
-                                                    <div className="flex items-center gap-4">
-                                                        <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-black tracking-tighter">{data.count}x</span>
-                                                        <p className="text-sm font-black w-16 text-right">${data.total.toFixed(2)}</p>
+
+                                    <div className="bg-white p-10 rounded-[3rem] border shadow-sm print-shadow-none print-full-width">
+                                        <div className="mb-10 border-b pb-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
+                                            <div>
+                                                <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none">
+                                                    {focusEntity !== 'all' ? focusEntity : 'Financial Summary'}
+                                                </h2>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
+                                                    {timeFilter === 'all' ? 'Lifetime Analysis' : timeFilter === 'month' ? 'Monthly Breakdown' : 'Annual Breakdown'} • {activeLedger.replace('_', ' ')}
+                                                </p>
+                                                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-1">
+                                                    Statement generated {new Date().toLocaleDateString()}
+                                                </p>
+                                            </div>
+                                            
+                                            <div className="grid grid-cols-3 gap-8 bg-slate-50 p-8 rounded-[2rem] border border-slate-100 min-w-[400px]">
+                                                <div>
+                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Inbound</p>
+                                                    <p className="text-xl font-black text-emerald-500 tracking-tight">${reports.totalIn.toFixed(2)}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Outbound</p>
+                                                    <p className="text-xl font-black text-indigo-500 tracking-tight">${reports.totalOut.toFixed(2)}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Net Flow</p>
+                                                    <p className={`text-xl font-black tracking-tight ${(reports.totalIn - reports.totalOut) >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                                        ${(reports.totalIn - reports.totalOut).toFixed(2)}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 print-full-width">
+                                            <div className={focusEntity !== 'all' && reports.totalOut > 0 ? 'lg:col-span-2' : ''}>
+                                                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800 mb-8 flex items-center gap-3">
+                                                    <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600"><Icon name="Store" size={16}/></div> 
+                                                    {focusEntity !== 'all' ? 'Transaction History' : 'Spending by Entity'}
+                                                </h3>
+                                                <div className="space-y-4">
+                                                    {reports.shops.length > 0 ? (
+                                                        focusEntity !== 'all' ? (
+                                                            <div className="space-y-3">
+                                                                {transactions.filter(t => t.description === focusEntity).map((t, idx) => (
+                                                                    <div key={idx} className="flex items-center justify-between p-5 rounded-2xl bg-slate-50 border border-slate-100 group">
+                                                                        <div>
+                                                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.date}</p>
+                                                                            <p className="text-sm font-black text-slate-800 uppercase mt-0.5">{t.category}</p>
+                                                                        </div>
+                                                                        <p className="text-base font-black text-indigo-600">-${Number(t.amount).toFixed(2)}</p>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            reports.shops.map(([shop, data]) => (
+                                                                <div key={shop} className="flex items-center justify-between p-5 rounded-2xl bg-slate-50 border border-slate-100 hover:border-indigo-200 transition-colors">
+                                                                    <div className="flex-1">
+                                                                        <p className="text-sm font-black text-slate-800 truncate pr-4 uppercase tracking-tight">{shop}</p>
+                                                                        <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">{data.count} Payments Recorded</p>
+                                                                    </div>
+                                                                    <p className="text-base font-black text-indigo-600 shrink-0">${data.total.toFixed(2)}</p>
+                                                                </div>
+                                                            ))
+                                                        )
+                                                    ) : <p className="text-[10px] text-slate-300 font-black italic">No expenditure history found for this criteria.</p>}
+                                                </div>
+                                            </div>
+
+                                            { (focusEntity === 'all' || reports.totalIn > 0) && (
+                                                <div className={focusEntity !== 'all' && reports.totalIn > 0 ? 'lg:col-span-2' : ''}>
+                                                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800 mb-8 flex items-center gap-3">
+                                                        <div className="bg-emerald-100 p-2 rounded-lg text-emerald-600"><Icon name="ArrowDownLeft" size={16}/></div>
+                                                        {focusEntity !== 'all' ? 'Credit History' : 'Income Streams'}
+                                                    </h3>
+                                                    <div className="space-y-4">
+                                                        {reports.credits.length > 0 ? (
+                                                            focusEntity !== 'all' ? (
+                                                                <div className="space-y-3">
+                                                                    {deposits.filter(d => d.description === focusEntity).map((d, idx) => (
+                                                                        <div key={idx} className="flex items-center justify-between p-5 rounded-2xl bg-emerald-50/30 border border-emerald-100/50 group">
+                                                                            <div>
+                                                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{d.date}</p>
+                                                                                <p className="text-sm font-black text-slate-800 uppercase mt-0.5">Deposit Received</p>
+                                                                            </div>
+                                                                            <p className="text-base font-black text-emerald-600">+${Number(d.amount).toFixed(2)}</p>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                reports.credits.map(([source, data]) => (
+                                                                    <div key={source} className="flex items-center justify-between p-5 rounded-2xl bg-emerald-50/50 border border-emerald-100/50">
+                                                                        <div className="flex-1">
+                                                                            <p className="text-sm font-black text-slate-800 truncate pr-4 uppercase tracking-tight">{source}</p>
+                                                                            <p className="text-[9px] font-bold text-emerald-500 uppercase mt-0.5">{data.count} Deposits Received</p>
+                                                                        </div>
+                                                                        <p className="text-base font-black text-emerald-600 shrink-0">+${data.total.toFixed(2)}</p>
+                                                                    </div>
+                                                                ))
+                                                            )
+                                                        ) : <p className="text-[10px] text-slate-300 font-black italic">No income history found for this criteria.</p>}
                                                     </div>
                                                 </div>
-                                            )) : <p className="text-center py-10 text-[10px] text-slate-300 font-black">Not enough data</p>}
+                                            )}
+
+                                            <div className="lg:col-span-2 pt-10 border-t mt-4">
+                                                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800 mb-8 flex items-center gap-3">
+                                                    <div className="bg-amber-100 p-2 rounded-lg text-amber-600"><Icon name="Tag" size={16}/></div>
+                                                    Itemized Purchase Frequency
+                                                </h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                    {reports.items.length > 0 ? reports.items.slice(0, 30).map(([item, data]) => (
+                                                        <div key={item} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-xs font-black text-slate-800 capitalize truncate pr-2">{item}</p>
+                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{data.count} Purchased</p>
+                                                            </div>
+                                                            <p className="text-sm font-black text-slate-900 shrink-0">${data.total.toFixed(2)}</p>
+                                                        </div>
+                                                    )) : <p className="text-[10px] text-slate-300 font-black col-span-full italic">No detailed item logs for this selection.</p>}
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -495,7 +716,6 @@
                         </div>
                     </main>
 
-                    {/* Modals */}
                     {isAdding && (
                         <Modal title={`Add to ${activeLedger.split('_')[0]}`} onClose={() => setIsAdding(false)}>
                             <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2 no-scrollbar">
@@ -593,7 +813,7 @@
         };
 
         const Modal = ({ title, children, onClose }) => (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 no-print">
                 <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden">
                     <div className="p-6 border-b flex justify-between items-center px-8">
                         <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">{title}</h3>
