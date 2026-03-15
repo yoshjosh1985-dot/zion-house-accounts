@@ -1,929 +1,668 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#4f46e5">
-    <title>HouseBank | AI Stabilized</title>
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, query, writeBatch, updateDoc } from 'firebase/firestore';
+import { 
+  LayoutDashboard, Receipt, Plus, PieChart, FileText, Trash2, 
+  X, Wallet, ArrowUpCircle, Search, Loader2, Camera, ShoppingBag, 
+  TrendingUp, CreditCard, Activity, ChevronRight, Printer, AlertCircle,
+  Users, CheckCircle2, Circle, BarChart3, Store, Tag, Sparkles
+} from 'lucide-react';
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+// --- Firebase Initialization ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'housebank-v4-final';
+const apiKey = ""; 
 
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+// --- Constants ---
+const LEDGERS = { HOUSEHOLD: 'household', FIXED_COSTS: 'fixed_costs' };
+const CATEGORIES = {
+  [LEDGERS.HOUSEHOLD]: ['Groceries', 'Dining Out', 'Household Items', 'Entertainment', 'Transport', 'Healthcare', 'Gifts', 'Miscellaneous'],
+  [LEDGERS.FIXED_COSTS]: ['Rent/Mortgage', 'Electricity', 'Water/Gas', 'Internet', 'Insurance', 'Phone Bill', 'Subscriptions', 'Council Rates']
+};
 
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .animate-scan { background: linear-gradient(to bottom, transparent 0%, rgba(79, 70, 229, 0.4) 50%, transparent 100%); background-size: 100% 200%; animation: scan 2s linear infinite; }
-        @keyframes scan { from { background-position: 0 -100%; } to { background-position: 0 100%; } }
-        .shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
-        @keyframes shake { 10%, 90% { transform: translate3d(-1px, 0, 0); } 20%, 80% { transform: translate3d(2px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-4px, 0, 0); } 40%, 60% { transform: translate3d(4px, 0, 0); } }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('dashboard');
+  const [activeLedger, setActiveLedger] = useState(LEDGERS.HOUSEHOLD);
+  const [transactions, setTransactions] = useState([]);
+  const [deposits, setDeposits] = useState([]);
+  const [lineItems, setLineItems] = useState([]);
+  
+  const [isAdding, setIsAdding] = useState(false);
+  const [isAddingDeposit, setIsAddingDeposit] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [aiProcessing, setAiProcessing] = useState(false);
+  const [scanError, setScanError] = useState(null);
+  const [globalSearch, setGlobalSearch] = useState('');
 
-    <script type="text/babel">
-        // Global Constants
-        const firebaseConfig = {
-            apiKey: "AIzaSyA53SpP4BQ3kU325m8PL3-7rY7iUTfp45s",
-            authDomain: "home-accounting-2463d.firebaseapp.com",
-            projectId: "home-accounting-2463d",
-            storageBucket: "home-accounting-2463d.appspot.com",
-            messagingSenderId: "645556460544",
-            appId: "1:645556460544:web:f7d822278af64654918ce5"
-        };
+  // Bill Splitting State
+  const [billSplits, setBillSplits] = useState([{ person: '', amount: '', paid: false }]);
 
-        const DEFAULT_APP_ID = 'home-accounting-2463d';
-        const FALLBACK_API_KEY = ""; // Gemini key must be provided via URL/localStorage/window.__apiKey
-        const runtimeConfig = (() => {
-            const params = new URLSearchParams(window.location.search);
-            const urlApiKey = params.get('apiKey');
-            const urlAppId = params.get('appId');
-            if (urlApiKey) localStorage.setItem('housebank_api_key', urlApiKey);
-            if (urlAppId) localStorage.setItem('housebank_app_id', urlAppId);
-            return {
-                apiKey: urlApiKey || window.__apiKey || localStorage.getItem('housebank_api_key') || FALLBACK_API_KEY,
-                appId: urlAppId || localStorage.getItem('housebank_app_id') || DEFAULT_APP_ID
-            };
-        })();
-        const appId = runtimeConfig.appId;
-        const apiKey = runtimeConfig.apiKey;
+  const [formData, setFormData] = useState({
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    amount: '',
+    category: CATEGORIES[LEDGERS.HOUSEHOLD][0],
+    items: []
+  });
 
-        // Initialize Firebase
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
+  // --- Auth ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
+        } else {
+          await signInAnonymously(auth);
         }
-
-        const LEDGERS = { HOUSEHOLD: 'household', FIXED_COSTS: 'fixed_costs' };
-        const CATEGORIES = {
-            [LEDGERS.HOUSEHOLD]: ['Groceries', 'Household Items', 'Dining Out', 'Cleaning', 'Toiletries', 'Miscellaneous'],
-            [LEDGERS.FIXED_COSTS]: ['Rent/Mortgage', 'Electricity', 'Water', 'Internet', 'Insurance', 'Phone Bill']
-        };
-
-        const App = () => {
-            const [user, setUser] = React.useState(null);
-            const [view, setView] = React.useState('dashboard');
-            const [activeLedger, setActiveLedger] = React.useState(LEDGERS.HOUSEHOLD);
-            const [transactions, setTransactions] = React.useState([]);
-            const [deposits, setDeposits] = React.useState([]);
-            const [allLineItems, setAllLineItems] = React.useState([]);
-            const [utilityBills, setUtilityBills] = React.useState([]);
-            const [loading, setLoading] = React.useState(true);
-            const [aiProcessing, setAiProcessing] = React.useState(false);
-            const [errorMsg, setErrorMsg] = React.useState(null);
-            const [activeModal, setActiveModal] = React.useState(null);
-            const [searchTerm, setSearchTerm] = React.useState('');
-            const [searchItem, setSearchItem] = React.useState('');
-            const [reportFilters, setReportFilters] = React.useState(() => {
-                const today = new Date();
-                const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-                const todayIso = today.toISOString().split('T')[0];
-                return { startDate: monthStart, endDate: todayIso, category: 'all', shop: 'all', contributor: 'all', minAmount: '', maxAmount: '', preset: 'monthly' };
-            });
-
-            const [formData, setFormData] = React.useState({
-                date: new Date().toISOString().split('T')[0],
-                description: '', amount: '', category: 'Groceries', contributor: '', targetBill: '', receiptUrl: '', shopName: '', lineItems: []
-            });
-
-            const [utilityForm, setUtilityForm] = React.useState({
-                name: '',
-                amount: '',
-                people: '2',
-                personNames: '',
-                paid: '',
-                dueDate: new Date().toISOString().split('T')[0]
-            });
-
-            React.useEffect(() => {
-                const initAuth = async () => {
-                    try {
-                        await firebase.auth().signInAnonymously();
-                    } catch (e) {
-                        console.error("Auth failed", e);
-                    }
-                };
-                initAuth();
-                const unsubscribe = firebase.auth().onAuthStateChanged((u) => {
-                    setUser(u);
-                    setLoading(false);
-                });
-                return () => unsubscribe();
-            }, []);
-
-            React.useEffect(() => {
-                if (!user) return;
-                const db = firebase.firestore();
-                const transPath = `artifacts/${appId}/public/data/transactions_${activeLedger}`;
-                const depPath = `artifacts/${appId}/public/data/deposits_${activeLedger}`;
-                const itemsPath = `artifacts/${appId}/public/data/line_items_${activeLedger}`;
-                const utilityPath = `artifacts/${appId}/public/data/utility_bills_${activeLedger}`;
-
-                const unsubT = db.collection(transPath).onSnapshot(s => setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'expense' }))), err => console.error(err));
-                const unsubD = db.collection(depPath).onSnapshot(s => setDeposits(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'deposit' }))), err => console.error(err));
-                const unsubI = db.collection(itemsPath).onSnapshot(s => setAllLineItems(s.docs.map(d => ({ ...d.data(), id: d.id }))), err => console.error(err));
-                const unsubU = db.collection(utilityPath).onSnapshot(s => setUtilityBills(s.docs.map(d => ({ ...d.data(), id: d.id }))), err => console.error(err));
-
-                return () => { unsubT(); unsubD(); unsubI(); unsubU(); };
-            }, [user, activeLedger]);
-
-            const stats = React.useMemo(() => {
-                const totalEx = transactions.reduce((a, c) => a + (Number(c.amount) || 0), 0);
-                const totalDep = deposits.reduce((a, c) => a + (Number(c.amount) || 0), 0);
-                const billProgress = transactions.reduce((acc, t) => {
-                    const deps = deposits.filter(d => d.targetBill === t.id);
-                    const paid = deps.reduce((a, c) => a + c.amount, 0);
-                    acc[t.id] = { total: t.amount, paid, remaining: Math.max(0, t.amount - paid) };
-                    return acc;
-                }, {});
-                return { balance: totalDep - totalEx, billProgress };
-            }, [transactions, deposits]);
-
-
-            const withTimeout = async (promise, timeoutMs, timeoutMsg) => {
-                let timer;
-                const timeout = new Promise((_, reject) => {
-                    timer = setTimeout(() => reject(new Error(timeoutMsg)), timeoutMs);
-                });
-                try {
-                    return await Promise.race([promise, timeout]);
-                } finally {
-                    clearTimeout(timer);
-                }
-            };
-
-            const runAiScanner = async (file) => {
-                if (!file) return;
-                setAiProcessing(true);
-                setErrorMsg(null);
-
-                if (!apiKey && typeof __apiKey === 'undefined' && !localStorage.getItem('housebank_api_key')) {
-                    await new Promise(r => setTimeout(r, 1000));
-                }
-
-                try {
-                    let downloadUrl = '';
-                    try {
-                        const safeName = (file.name || 'receipt').replace(/[^a-zA-Z0-9_.-]/g, '_');
-                        const storageRef = firebase.storage().ref().child(`artifacts/${appId}/public/receipts/${Date.now()}_${safeName}`);
-                        const uploadTask = await withTimeout(storageRef.put(file), 30000, "Receipt upload timed out. Try a smaller file.");
-                        downloadUrl = await uploadTask.ref.getDownloadURL();
-                        setFormData(prev => ({ ...prev, receiptUrl: downloadUrl }));
-                    } catch (uploadErr) {
-                        console.warn("Receipt file upload failed:", uploadErr);
-                        setErrorMsg("Receipt file could not be uploaded to storage. You can still enter details manually.");
-                    }
-
-                    if (!['image/', 'application/pdf'].some(type => (file.type || '').startsWith(type) || file.type === type)) {
-                        throw new Error('Only image or PDF receipts are supported.');
-                    }
-
-                    const base64Data = await new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = () => resolve(reader.result.split(',')[1]);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(file);
-                    });
-
-                    const callGemini = async () => {
-                        const actualKey = apiKey || window.__apiKey || localStorage.getItem('housebank_api_key') || "";
-                        if (!actualKey) throw new Error("API Key not initialized. Add ?apiKey=YOUR_KEY to the URL.");
-
-                        const prompt = [
-                            "You are parsing a grocery receipt image or PDF.",
-                            "Return ONLY valid JSON with this shape:",
-                            '{"shopName":"", "description":"", "amount":0, "category":"Groceries", "items":[{"name":"", "price":0, "category":""}]}'
-                        ].join("\n");
-
-                        const models = ["gemini-1.5-flash-latest", "gemini-2.0-flash-exp"];
-                        let lastError = "";
-
-                        for (const model of models) {
-                            for (let attempt = 0; attempt < 3; attempt++) {
-                                const response = await withTimeout(fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${actualKey}`, {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                        contents: [{
-                                            parts: [
-                                                { text: prompt },
-                                                { inlineData: { mimeType: file.type || 'application/octet-stream', data: base64Data } }
-                                            ]
-                                        }],
-                                        generationConfig: { temperature: 0.1 }
-                                    })
-                                }), 25000, `Scanner request timed out on ${model}.`);
-
-                                if (response.ok) return response.json();
-                                const errorBody = await response.text();
-                                if (response.status === 403) {
-                                    throw new Error("Gemini API access denied (403). Add a valid Gemini API key with ?apiKey=YOUR_GEMINI_KEY and make sure Generative Language API is enabled in Google Cloud.");
-                                }
-                                lastError = `${model} failed (${response.status}) ${errorBody.slice(0, 160)}`;
-                                await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 600));
-                            }
-                        }
-
-                        throw new Error(lastError || "Cloud connection failed.");
-                    };
-
-                    const normalizeJsonText = (raw) => {
-                        if (!raw) return "";
-                        const trimmed = raw.trim();
-                        if (trimmed.startsWith("```")) {
-                            return trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-                        }
-                        return trimmed;
-                    };
-
-                    const result = await callGemini();
-                    const parts = result.candidates?.[0]?.content?.parts || [];
-                    const textResponse = parts.map(p => p.text || '').join('\n').trim();
-                    const cleanText = normalizeJsonText(textResponse);
-                    if (!cleanText) throw new Error("AI returned empty data.");
-
-                    const extracted = JSON.parse(cleanText);
-                    const cleanedItems = Array.isArray(extracted.items)
-                        ? extracted.items
-                            .filter(item => item && (item.name || item.price))
-                            .map(item => ({
-                                name: item.name || 'Item',
-                                price: Number(item.price) || 0,
-                                category: item.category || extracted.category || 'Groceries'
-                            }))
-                        : [];
-
-                    setFormData(prev => ({
-                        ...prev,
-                        description: extracted.description || prev.description,
-                        amount: Number(extracted.amount) || prev.amount,
-                        category: extracted.category || prev.category,
-                        receiptUrl: prev.receiptUrl || downloadUrl,
-                        shopName: extracted.shopName || extracted.description || prev.shopName,
-                        lineItems: cleanedItems
-                    }));
-
-                } catch (err) {
-                    console.error("Scanner Error:", err);
-                    setErrorMsg(err.message || "Scanning timed out. Enter details below.");
-                } finally {
-                    setAiProcessing(false);
-                }
-            };
-
-            const handleSubmit = async (e) => {
-                e.preventDefault();
-                const db = firebase.firestore();
-                const type = activeModal === 'deposit' ? 'deposit' : 'expense';
-                const collectionName = type === 'expense' ? `transactions_${activeLedger}` : `deposits_${activeLedger}`;
-
-                const data = {
-                    date: formData.date,
-                    description: formData.description,
-                    amount: parseFloat(formData.amount) || 0,
-                    category: formData.category,
-                    shopName: formData.shopName,
-                    contributor: formData.contributor,
-                    targetBill: formData.targetBill,
-                    receiptUrl: formData.receiptUrl,
-                    ts: Date.now()
-                };
-
-                const doc = await db.collection(`artifacts/${appId}/public/data/${collectionName}`).add(data);
-
-                if (formData.lineItems.length > 0) {
-                    const batch = db.batch();
-                    formData.lineItems.forEach(item => {
-                        const ref = db.collection(`artifacts/${appId}/public/data/line_items_${activeLedger}`).doc();
-                        batch.set(ref, {
-                            ...item,
-                            category: item.category || formData.category,
-                            shopName: formData.shopName || formData.description,
-                            transactionId: doc.id,
-                            date: formData.date
-                        });
-                    });
-                    await batch.commit();
-                }
-
-                setActiveModal(null);
-                setFormData({ date: new Date().toISOString().split('T')[0], description: '', amount: '', category: 'Groceries', contributor: '', targetBill: '', receiptUrl: '', shopName: '', lineItems: [] });
-            };
-
-
-            const addUtilityBill = async (e) => {
-                e.preventDefault();
-                const db = firebase.firestore();
-                const data = {
-                    name: utilityForm.name || 'Utility Bill',
-                    amount: Number(utilityForm.amount) || 0,
-                    people: Math.max(1, Number(utilityForm.people) || 1),
-                    personNames: utilityForm.personNames.split(',').map(n => n.trim()).filter(Boolean),
-                    paid: Number(utilityForm.paid) || 0,
-                    dueDate: utilityForm.dueDate,
-                    ts: Date.now()
-                };
-                await db.collection(`artifacts/${appId}/public/data/utility_bills_${activeLedger}`).add(data);
-                setUtilityForm({ name: '', amount: '', people: '2', personNames: '', paid: '', dueDate: new Date().toISOString().split('T')[0] });
-            };
-
-            const addUtilityPayment = async (bill, amount, personName = '') => {
-                const payment = Number(amount);
-                if (!payment || !bill?.id) return;
-                const db = firebase.firestore();
-                const ref = db.collection(`artifacts/${appId}/public/data/utility_bills_${activeLedger}`).doc(bill.id);
-                await db.runTransaction(async (tx) => {
-                    const snap = await tx.get(ref);
-                    if (!snap.exists) return;
-                    const current = snap.data();
-                    const nextPaid = (Number(current.paid) || 0) + payment;
-                    const paidBy = { ...(current.paidBy || {}) };
-                    if (personName) paidBy[personName] = (Number(paidBy[personName]) || 0) + payment;
-                    tx.update(ref, { paid: nextPaid, paidBy });
-                });
-            };
-
-            const utilitySummary = React.useMemo(() => {
-                const rows = utilityBills
-                    .slice()
-                    .sort((a, b) => new Date(a.dueDate || 0) - new Date(b.dueDate || 0))
-                    .map(bill => {
-                        const total = Number(bill.amount) || 0;
-                        const paid = Number(bill.paid) || 0;
-                        const fallbackPeople = Math.max(1, Number(bill.people) || 1);
-                        const names = Array.isArray(bill.personNames) && bill.personNames.length
-                            ? bill.personNames
-                            : Array.from({ length: fallbackPeople }, (_, i) => `Person ${i + 1}`);
-                        const people = names.length;
-                        const remaining = Math.max(0, total - paid);
-                        const paidBy = bill.paidBy || {};
-                        const sharePerPerson = total / people;
-                        const personBalances = names.map((name) => ({
-                            name,
-                            paid: Number(paidBy[name]) || 0,
-                            remaining: Math.max(0, sharePerPerson - (Number(paidBy[name]) || 0))
-                        }));
-                        return {
-                            ...bill,
-                            total,
-                            paid,
-                            people,
-                            names,
-                            paidBy,
-                            remaining,
-                            sharePerPerson,
-                            remainingPerPerson: remaining / people,
-                            personBalances
-                        };
-                    });
-                const totalRemaining = rows.reduce((acc, row) => acc + row.remaining, 0);
-                return { rows, totalRemaining };
-            }, [utilityBills]);
-
-            const filteredHistory = React.useMemo(() => {
-                const combined = [...transactions, ...deposits].sort((a,b) => new Date(b.date) - new Date(a.date));
-                if (!searchTerm) return combined;
-                return combined.filter(i => i.description?.toLowerCase().includes(searchTerm.toLowerCase()));
-            }, [transactions, deposits, searchTerm]);
-
-            const availableShops = React.useMemo(() => {
-                return [...new Set(transactions.map(t => t.shopName || t.description).filter(Boolean))].sort();
-            }, [transactions]);
-
-            const availableContributors = React.useMemo(() => {
-                return [...new Set(transactions.map(t => t.contributor).filter(Boolean))].sort();
-            }, [transactions]);
-
-            const spendReport = React.useMemo(() => {
-                const inDateRange = transactions.filter(t => {
-                    if (!t.date) return false;
-                    if (reportFilters.startDate && t.date < reportFilters.startDate) return false;
-                    if (reportFilters.endDate && t.date > reportFilters.endDate) return false;
-                    if (reportFilters.category !== 'all' && t.category !== reportFilters.category) return false;
-                    const shop = t.shopName || t.description;
-                    if (reportFilters.shop !== 'all' && shop !== reportFilters.shop) return false;
-                    if (reportFilters.contributor !== 'all' && (t.contributor || 'Unknown') !== reportFilters.contributor) return false;
-                    if (reportFilters.minAmount && Number(t.amount || 0) < Number(reportFilters.minAmount)) return false;
-                    if (reportFilters.maxAmount && Number(t.amount || 0) > Number(reportFilters.maxAmount)) return false;
-                    return true;
-                });
-
-                const totalSpend = inDateRange.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-                const categoryTotals = Object.entries(inDateRange.reduce((acc, t) => {
-                    const key = t.category || 'Uncategorized';
-                    acc[key] = (acc[key] || 0) + (Number(t.amount) || 0);
-                    return acc;
-                }, {})).sort((a, b) => b[1] - a[1]);
-
-                const shopTotals = Object.entries(inDateRange.reduce((acc, t) => {
-                    const key = t.shopName || t.description || 'Unknown Shop';
-                    acc[key] = (acc[key] || 0) + (Number(t.amount) || 0);
-                    return acc;
-                }, {})).sort((a, b) => b[1] - a[1]);
-
-                const txIds = new Set(inDateRange.map(t => t.id));
-                const topItems = Object.entries(allLineItems.filter(li => txIds.has(li.transactionId)).reduce((acc, li) => {
-                    const key = li.name || 'Unknown Item';
-                    const existing = acc[key] || { spend: 0, count: 0 };
-                    existing.spend += Number(li.price) || 0;
-                    existing.count += 1;
-                    acc[key] = existing;
-                    return acc;
-                }, {})).map(([name, value]) => ({ name, ...value })).sort((a, b) => b.spend - a.spend).slice(0, 8);
-
-                const dailyTotals = Object.entries(inDateRange.reduce((acc, t) => {
-                    acc[t.date] = (acc[t.date] || 0) + (Number(t.amount) || 0);
-                    return acc;
-                }, {})).sort((a, b) => new Date(a[0]) - new Date(b[0]));
-
-                const monthlyTotals = Object.entries(inDateRange.reduce((acc, t) => {
-                    const monthKey = (t.date || '').slice(0, 7) || 'unknown';
-                    acc[monthKey] = (acc[monthKey] || 0) + (Number(t.amount) || 0);
-                    return acc;
-                }, {})).sort((a, b) => a[0].localeCompare(b[0]));
-
-                const rangeDays = reportFilters.startDate && reportFilters.endDate
-                    ? Math.max(1, Math.ceil((new Date(reportFilters.endDate) - new Date(reportFilters.startDate)) / 86400000) + 1)
-                    : 30;
-                const prevEndDate = reportFilters.startDate ? new Date(new Date(reportFilters.startDate).getTime() - 86400000) : new Date();
-                const prevStartDate = new Date(prevEndDate.getTime() - (rangeDays - 1) * 86400000);
-                const prevStart = prevStartDate.toISOString().slice(0, 10);
-                const prevEnd = prevEndDate.toISOString().slice(0, 10);
-                const previousPeriodTotal = transactions.filter(t => t.date && t.date >= prevStart && t.date <= prevEnd)
-                    .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-                const trendDelta = totalSpend - previousPeriodTotal;
-                const trendPct = previousPeriodTotal > 0 ? (trendDelta / previousPeriodTotal) * 100 : null;
-
-                return { rows: inDateRange.sort((a,b)=>new Date(b.date)-new Date(a.date)), totalSpend, categoryTotals, shopTotals, topItems, dailyTotals, monthlyTotals, previousPeriodTotal, trendDelta, trendPct };
-            }, [transactions, allLineItems, reportFilters]);
-
-            const applyDatePreset = (preset) => {
-                const today = new Date();
-                let start = reportFilters.startDate;
-                let end = reportFilters.endDate;
-                if (preset === 'weekly') {
-                    const d = new Date(today);
-                    const day = d.getDay();
-                    const diff = (day + 6) % 7;
-                    d.setDate(d.getDate() - diff);
-                    start = d.toISOString().split('T')[0];
-                    end = today.toISOString().split('T')[0];
-                } else if (preset === 'monthly') {
-                    start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-                    end = today.toISOString().split('T')[0];
-                }
-                setReportFilters(prev => ({ ...prev, preset, startDate: start, endDate: end }));
-            };
-
-            const downloadTextFile = (filename, content, mimeType) => {
-                const blob = new Blob([content], { type: mimeType });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                a.click();
-                URL.revokeObjectURL(url);
-            };
-
-            const exportCsvBackup = (dateFilteredOnly = false) => {
-                const inRange = (date) => {
-                    if (!dateFilteredOnly) return true;
-                    if (!date) return false;
-                    if (reportFilters.startDate && date < reportFilters.startDate) return false;
-                    if (reportFilters.endDate && date > reportFilters.endDate) return false;
-                    return true;
-                };
-
-                const rows = [];
-                transactions.filter(t => inRange(t.date)).forEach(t => rows.push({ section: 'transaction', date: t.date, description: t.description, amount: t.amount, category: t.category, contributor: t.contributor || '', shopName: t.shopName || '', receiptUrl: t.receiptUrl || '' }));
-                deposits.filter(d => inRange(d.date)).forEach(d => rows.push({ section: 'deposit', date: d.date, description: d.description, amount: d.amount, category: '', contributor: d.contributor || '', shopName: '', receiptUrl: '' }));
-                utilityBills.filter(u => inRange(u.dueDate)).forEach(u => rows.push({ section: 'utility', date: u.dueDate, description: u.name, amount: u.amount, category: 'utility', contributor: (u.personNames || []).join('|'), shopName: '', receiptUrl: '' }));
-
-                const headers = ['section', 'date', 'description', 'amount', 'category', 'contributor', 'shopName', 'receiptUrl'];
-                const csv = [headers.join(',')].concat(rows.map(r => headers.map(h => `\"${String(r[h] ?? '').replace(/\"/g, '\"\"')}\"`).join(','))).join(String.fromCharCode(10));
-                const suffix = dateFilteredOnly ? `${reportFilters.startDate || 'start'}_to_${reportFilters.endDate || 'end'}` : 'all_data';
-                downloadTextFile(`housebank_backup_${suffix}.csv`, csv, 'text/csv;charset=utf-8;');
-            };
-
-            const exportReportPdf = () => {
-                if (!window.jspdf?.jsPDF) {
-                    setErrorMsg('PDF library failed to load. Refresh and try again.');
-                    return;
-                }
-                const doc = new window.jspdf.jsPDF();
-                doc.setFontSize(16);
-                doc.text('HouseBank Spend Report', 14, 16);
-                doc.setFontSize(10);
-                doc.text(`Ledger: ${activeLedger}`, 14, 24);
-                doc.text(`Date range: ${reportFilters.startDate || 'N/A'} to ${reportFilters.endDate || 'N/A'}`, 14, 30);
-                doc.text(`Total spend: $${spendReport.totalSpend.toFixed(2)} | Transactions: ${spendReport.rows.length}`, 14, 36);
-                let y = 44;
-                doc.text('Transactions:', 14, y);
-                y += 6;
-                spendReport.rows.slice(0, 35).forEach((row) => {
-                    doc.text(`${row.date} | ${row.shopName || row.description} | ${row.category || ''} | $${Number(row.amount || 0).toFixed(2)}`, 14, y);
-                    y += 5;
-                    if (y > 280) { doc.addPage(); y = 16; }
-                });
-                doc.save(`housebank_report_${reportFilters.startDate || 'start'}_${reportFilters.endDate || 'end'}.pdf`);
-            };
-
-            if (loading) return <div className="h-screen flex items-center justify-center font-black text-indigo-600 uppercase tracking-tighter animate-pulse">Establishing Secure Link...</div>;
-
-            return (
-                <div className="flex flex-col md:flex-row min-h-screen bg-[#fcfdfe]">
-                    {/* Sidebar */}
-                    <aside className="hidden md:flex flex-col w-72 bg-white border-r p-8 shrink-0">
-                        <div className="text-xl font-black text-indigo-600 mb-10 italic tracking-tighter">HOUSEBANK.AI</div>
-                        <nav className="space-y-1">
-                            {['dashboard', 'ledger', 'utilities', 'analytics'].map(v => (
-                                <button key={v} onClick={()=>setView(v)} className={`w-full text-left p-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${view===v?'bg-indigo-600 text-white shadow-xl shadow-indigo-100 scale-[1.02]':'text-slate-400 hover:text-indigo-600'}`}>{v}</button>
-                            ))}
-                        </nav>
-                    </aside>
-
-                    <main className="flex-1 p-4 md:p-10 pb-32 max-w-5xl mx-auto w-full">
-
-                        {!apiKey && (
-                            <div className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl text-xs font-bold">
-                                AI receipt scan needs a valid Gemini key. Open this deployed page with
-                                <span className="font-black"> ?apiKey=YOUR_GEMINI_KEY </span>
-                                and ensure Generative Language API is enabled for that key's project.
-                            </div>
-                        )}
-
-                        <div className="flex bg-slate-100 p-1 rounded-2xl mb-8 w-fit shadow-inner">
-                            {Object.values(LEDGERS).map(l => (
-                                <button key={l} onClick={()=>setActiveLedger(l)} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${activeLedger === l ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}>
-                                    {l.replace('_', ' ')}
-                                </button>
-                            ))}
-                        </div>
-
-                        {view === 'dashboard' ? (
-                            <div className="space-y-6">
-                                <div className="flex justify-between items-end">
-                                    <h1 className="text-3xl font-black text-slate-800 tracking-tight">Cloud Overview</h1>
-                                    <div className="flex gap-2">
-                                        <button onClick={()=>setActiveModal('expense')} className="bg-indigo-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95">+ Add Expense</button>
-                                        <button onClick={()=>setActiveModal('deposit')} className="bg-emerald-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95">+ Add Credit</button>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] relative overflow-hidden group shadow-2xl">
-                                        <div className="relative z-10">
-                                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Available Funds</div>
-                                            <div className="text-4xl font-black tracking-tighter">${stats.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
-                                        </div>
-                                        <div className="absolute -right-4 -bottom-4 text-9xl opacity-10 rotate-12 transition-transform group-hover:scale-125">💳</div>
-                                    </div>
-                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Unpaid Liabilities</h3>
-                                        <div className="space-y-4">
-                                            {transactions.filter(t => stats.billProgress[t.id]?.remaining > 0).length === 0 ? <p className="text-xs text-slate-300 font-bold uppercase italic">All bills settled</p> :
-                                            transactions.filter(t => stats.billProgress[t.id]?.remaining > 0).slice(0,3).map(t => (
-                                                <div key={t.id} className="flex justify-between items-center group/item">
-                                                    <span className="font-bold text-sm text-slate-700">{t.description}</span>
-                                                    <span className="font-black text-indigo-600 text-sm group-hover/item:scale-110 transition-transform">${stats.billProgress[t.id].remaining.toFixed(2)}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
-                                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Receipt Summary by Shop</h3>
-                                    <div className="space-y-3">
-                                        {!spendReport.shopTotals.length && <p className="text-xs text-slate-300 font-bold uppercase italic">No receipt data in this ledger</p>}
-                                        {spendReport.shopTotals.slice(0, 6).map(([shop, total]) => (
-                                            <div key={shop} className="flex justify-between items-center">
-                                                <span className="font-bold text-sm text-slate-700 truncate pr-4">{shop}</span>
-                                                <span className="font-black text-indigo-600 text-sm">${total.toFixed(2)}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        ) : view === 'ledger' ? (
-                            <div className="space-y-6">
-                                <div className="flex justify-between items-center">
-                                    <h1 className="text-3xl font-black text-slate-800">Ledger</h1>
-                                    <input type="text" placeholder="Search logs..." className="p-4 bg-white border rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-50 shadow-sm" onChange={e=>setSearchTerm(e.target.value)} />
-                                </div>
-                                <div className="bg-white rounded-[2rem] border overflow-hidden shadow-sm">
-                                    {filteredHistory.length === 0 ? <div className="p-20 text-center text-slate-300 font-bold uppercase tracking-widest">No entries found</div> :
-                                    filteredHistory.map(item => (
-                                        <div key={item.id} className="p-6 border-b last:border-0 flex justify-between items-center hover:bg-slate-50 transition-colors cursor-pointer group">
-                                            <div>
-                                                <div className="text-[10px] font-bold text-slate-400 uppercase">{item.date}</div>
-                                                <div className="font-black text-slate-800 group-hover:text-indigo-600 transition-colors">{item.description}</div>
-                                                <div className="text-[10px] font-bold text-indigo-500 uppercase">{item.type==='expense'?item.category:`From ${item.contributor}`}</div>
-                                            </div>
-                                            <div className={`font-black text-lg ${item.type==='expense'?'text-slate-900':'text-emerald-600'}`}>
-                                                {item.type==='expense'?'-':'+'}${(item.amount || 0).toFixed(2)}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : view === 'utilities' ? (
-                            <div className="space-y-6">
-                                <div className="flex justify-between items-end">
-                                    <h1 className="text-3xl font-black text-slate-800 tracking-tight">Utilities</h1>
-                                    <span className="text-xs font-black text-indigo-600">Remaining ${utilitySummary.totalRemaining.toFixed(2)}</span>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Add Utility Bill</h3>
-                                        <form onSubmit={addUtilityBill} className="grid grid-cols-2 gap-3">
-                                            <input className="col-span-2 p-3 bg-slate-50 rounded-xl font-bold text-sm" placeholder="Utility name (Electricity, Water...)" value={utilityForm.name} onChange={e=>setUtilityForm(prev=>({...prev, name:e.target.value}))} required />
-                                            <input className="p-3 bg-slate-50 rounded-xl font-bold text-sm" type="number" step="0.01" placeholder="Total bill" value={utilityForm.amount} onChange={e=>setUtilityForm(prev=>({...prev, amount:e.target.value}))} required />
-                                            <input className="p-3 bg-slate-50 rounded-xl font-bold text-sm" type="number" min="1" placeholder="People count" value={utilityForm.people} onChange={e=>setUtilityForm(prev=>({...prev, people:e.target.value}))} required />
-                                            <input className="col-span-2 p-3 bg-slate-50 rounded-xl font-bold text-sm" placeholder="Person names (comma separated)" value={utilityForm.personNames} onChange={e=>setUtilityForm(prev=>({...prev, personNames:e.target.value}))} />
-                                            <input className="p-3 bg-slate-50 rounded-xl font-bold text-sm" type="number" step="0.01" placeholder="Paid so far" value={utilityForm.paid} onChange={e=>setUtilityForm(prev=>({...prev, paid:e.target.value}))} />
-                                            <input className="p-3 bg-slate-50 rounded-xl font-bold text-sm" type="date" value={utilityForm.dueDate} onChange={e=>setUtilityForm(prev=>({...prev, dueDate:e.target.value}))} />
-                                            <button type="submit" className="col-span-2 bg-indigo-600 text-white py-3 rounded-xl font-black text-[10px] uppercase">Save Utility Bill</button>
-                                        </form>
-                                    </div>
-                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Utility Balances</h3>
-                                        <div className="space-y-3 max-h-[32rem] overflow-y-auto no-scrollbar">
-                                            {!utilitySummary.rows.length && <p className="text-xs text-slate-300 font-bold uppercase italic">No utility bills yet</p>}
-                                            {utilitySummary.rows.map(bill => (
-                                                <div key={bill.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                                                    <div className="flex justify-between items-center">
-                                                        <div>
-                                                            <div className="font-black text-slate-800">{bill.name}</div>
-                                                            <div className="text-[10px] uppercase font-bold text-slate-400">Due {bill.dueDate || 'N/A'} · {bill.people} people</div>
-                                                        </div>
-                                                        <div className="text-right">
-                                                            <div className="font-black text-indigo-600">${bill.remaining.toFixed(2)} left</div>
-                                                            <div className="text-[10px] font-bold text-slate-400">${bill.remainingPerPerson.toFixed(2)} each</div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-3 text-[11px] font-bold text-slate-500">Paid ${bill.paid.toFixed(2)} / ${bill.total.toFixed(2)} · Share ${bill.sharePerPerson.toFixed(2)} each</div>
-                                                    <div className="mt-3 grid gap-2">
-                                                        {bill.personBalances.map(pb => (
-                                                            <div key={pb.name} className="flex justify-between items-center bg-white rounded-lg px-3 py-2">
-                                                                <div className="text-xs font-black text-slate-700">{pb.name}</div>
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="text-[10px] font-bold text-slate-500">left ${pb.remaining.toFixed(2)}</span>
-                                                                    <button type="button" onClick={() => addUtilityPayment(bill, pb.remaining, pb.name)} className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-[10px] font-black uppercase">Paid</button>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                        <button type="button" onClick={() => addUtilityPayment(bill, bill.remaining)} className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-black uppercase">Mark Settled</button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-) : (
-                            <div className="space-y-8">
-                                <div className="max-w-2xl space-y-4">
-                                    <h1 className="text-3xl font-black text-slate-800">Spend Reporting</h1>
-                                    <div className="flex flex-wrap gap-2">
-                                        <button type="button" onClick={()=>applyDatePreset('weekly')} className="px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase">Weekly</button>
-                                        <button type="button" onClick={()=>applyDatePreset('monthly')} className="px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase">Monthly</button>
-                                        <button type="button" onClick={()=>applyDatePreset('custom')} className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-[10px] font-black uppercase">Custom</button>
-                                        <button type="button" onClick={exportReportPdf} className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase">Export PDF</button>
-                                        <button type="button" onClick={()=>exportCsvBackup(true)} className="px-3 py-2 rounded-xl bg-amber-50 text-amber-700 text-[10px] font-black uppercase">Excel CSV (Range)</button>
-                                        <button type="button" onClick={()=>exportCsvBackup(false)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase">Excel CSV (All Data)</button>
-                                    </div>
-                                    <div className="bg-white rounded-[2rem] border p-5 grid md:grid-cols-3 gap-3 shadow-sm">
-                                        <Input label="Start Date" type="date" value={reportFilters.startDate} onChange={e=>setReportFilters(prev=>({...prev, preset:'custom', startDate:e.target.value}))} />
-                                        <Input label="End Date" type="date" value={reportFilters.endDate} onChange={e=>setReportFilters(prev=>({...prev, preset:'custom', endDate:e.target.value}))} />
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase ml-1 tracking-widest">Category</label>
-                                            <select className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-0 focus:ring-4 focus:ring-indigo-50" value={reportFilters.category} onChange={e=>setReportFilters(prev=>({...prev, category:e.target.value}))}>
-                                                <option value="all">All Categories</option>
-                                                {CATEGORIES[activeLedger].map(c => <option key={c} value={c}>{c}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase ml-1 tracking-widest">Shop</label>
-                                            <select className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-0 focus:ring-4 focus:ring-indigo-50" value={reportFilters.shop} onChange={e=>setReportFilters(prev=>({...prev, shop:e.target.value}))}>
-                                                <option value="all">All Shops</option>
-                                                {availableShops.map(shop => <option key={shop} value={shop}>{shop}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase ml-1 tracking-widest">Contributor</label>
-                                            <select className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-0 focus:ring-4 focus:ring-indigo-50" value={reportFilters.contributor} onChange={e=>setReportFilters(prev=>({...prev, contributor:e.target.value}))}>
-                                                <option value="all">All Contributors</option>
-                                                <option value="Unknown">Unknown</option>
-                                                {availableContributors.map(name => <option key={name} value={name}>{name}</option>)}
-                                            </select>
-                                        </div>
-                                        <Input label="Min Amount ($)" type="number" step="0.01" value={reportFilters.minAmount} onChange={e=>setReportFilters(prev=>({...prev, minAmount:e.target.value}))} />
-                                        <Input label="Max Amount ($)" type="number" step="0.01" value={reportFilters.maxAmount} onChange={e=>setReportFilters(prev=>({...prev, maxAmount:e.target.value}))} />
-                                    </div>
-                                </div>
-
-                                <div className="grid md:grid-cols-3 gap-4">
-                                    <div className="bg-white border rounded-[2rem] p-6">
-                                        <div className="text-[10px] uppercase font-black text-slate-400">Total Spend</div>
-                                        <div className="text-3xl font-black text-slate-800">${spendReport.totalSpend.toFixed(2)}</div>
-                                    </div>
-                                    <div className="bg-white border rounded-[2rem] p-6">
-                                        <div className="text-[10px] uppercase font-black text-slate-400">Transactions</div>
-                                        <div className="text-3xl font-black text-slate-800">{spendReport.rows.length}</div>
-                                    </div>
-                                    <div className="bg-white border rounded-[2rem] p-6">
-                                        <div className="text-[10px] uppercase font-black text-slate-400">Avg. Transaction</div>
-                                        <div className="text-3xl font-black text-slate-800">${(spendReport.rows.length ? spendReport.totalSpend / spendReport.rows.length : 0).toFixed(2)}</div>
-                                    </div>
-                                </div>
-
-                                <div className="grid md:grid-cols-2 gap-4">
-                                    <div className="bg-white border rounded-[2rem] p-6 space-y-3">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Spend by Category</h3>
-                                        {spendReport.categoryTotals.map(([category, total]) => <div key={category} className="flex justify-between font-bold text-sm"><span>{category}</span><span className="text-indigo-600">${total.toFixed(2)}</span></div>)}
-                                        {!spendReport.categoryTotals.length && <p className="text-[11px] text-slate-400 font-bold uppercase">No data for current filters</p>}
-                                    </div>
-                                    <div className="bg-white border rounded-[2rem] p-6 space-y-3">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Spend by Shop</h3>
-                                        {spendReport.shopTotals.map(([shop, total]) => <div key={shop} className="flex justify-between font-bold text-sm"><span>{shop}</span><span className="text-indigo-600">${total.toFixed(2)}</span></div>)}
-                                        {!spendReport.shopTotals.length && <p className="text-[11px] text-slate-400 font-bold uppercase">No data for current filters</p>}
-                                    </div>
-                                </div>
-
-                                <div className="grid md:grid-cols-2 gap-4">
-                                    <div className="bg-white border rounded-[2rem] p-6 space-y-3">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Daily Spend Totals</h3>
-                                        {spendReport.dailyTotals.map(([day, total]) => <div key={day} className="flex justify-between font-bold text-sm"><span>{day}</span><span className="text-indigo-600">${total.toFixed(2)}</span></div>)}
-                                        {!spendReport.dailyTotals.length && <p className="text-[11px] text-slate-400 font-bold uppercase">No data for current filters</p>}
-                                    </div>
-                                    <div className="bg-white border rounded-[2rem] p-6 space-y-3">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Top Receipt Items</h3>
-                                        {spendReport.topItems.map(item => <div key={item.name} className="flex justify-between font-bold text-sm"><span>{item.name} <span className="text-[10px] text-slate-400">({item.count}x)</span></span><span className="text-indigo-600">${item.spend.toFixed(2)}</span></div>)}
-                                        {!spendReport.topItems.length && <p className="text-[11px] text-slate-400 font-bold uppercase">Scan receipts to see item detail</p>}
-                                    </div>
-                                </div>
-
-
-                                <div className="grid md:grid-cols-2 gap-4">
-                                    <div className="bg-white border rounded-[2rem] p-6 space-y-3">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Spend Trend vs Previous Period</h3>
-                                        <div className="text-sm font-bold text-slate-600">Current: <span className="text-slate-900">${spendReport.totalSpend.toFixed(2)}</span></div>
-                                        <div className="text-sm font-bold text-slate-600">Previous: <span className="text-slate-900">${spendReport.previousPeriodTotal.toFixed(2)}</span></div>
-                                        <div className={`text-sm font-black ${spendReport.trendDelta > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                                            {spendReport.trendDelta > 0 ? '▲' : '▼'} ${Math.abs(spendReport.trendDelta).toFixed(2)}
-                                            {spendReport.trendPct !== null ? ` (${Math.abs(spendReport.trendPct).toFixed(1)}%)` : ''}
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 font-bold uppercase">Compare if shopping/bills are up or down</p>
-                                    </div>
-                                    <div className="bg-white border rounded-[2rem] p-6 space-y-3">
-                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Monthly Spend Graph</h3>
-                                        <div className="space-y-2">
-                                            {spendReport.monthlyTotals.map(([month, total]) => {
-                                                const max = Math.max(...spendReport.monthlyTotals.map(([, t]) => t), 1);
-                                                const width = Math.max(8, (total / max) * 100);
-                                                return <div key={month} className="space-y-1">
-                                                    <div className="flex justify-between text-[11px] font-bold text-slate-600"><span>{month}</span><span>${total.toFixed(2)}</span></div>
-                                                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 rounded-full" style={{width: `${width}%`}}></div></div>
-                                                </div>;
-                                            })}
-                                            {!spendReport.monthlyTotals.length && <p className="text-[11px] text-slate-400 font-bold uppercase">No trend data available</p>}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="max-w-md">
-                                    <h2 className="text-2xl font-black text-slate-800">Item Price Tracking</h2>
-                                    <input type="text" placeholder="Type an item (Milk, Eggs...)" className="w-full mt-4 p-5 bg-white border-2 border-slate-100 rounded-[2rem] font-bold shadow-lg focus:border-indigo-500 transition-all outline-none" value={searchItem} onChange={e=>setSearchItem(e.target.value)} />
-                                </div>
-
-                                <div className="bg-white rounded-[2rem] border overflow-hidden shadow-sm">
-                                    <div className="px-6 py-4 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">Detailed Transactions</div>
-                                    {spendReport.rows.map(item => (
-                                        <div key={item.id} className="p-5 border-b last:border-0 flex justify-between items-center">
-                                            <div>
-                                                <div className="text-[10px] uppercase font-bold text-slate-400">{item.date} · {item.shopName || item.description}</div>
-                                                <div className="font-black text-slate-800">{item.description}</div>
-                                                <div className="text-[10px] uppercase font-bold text-indigo-500">{item.category}</div>
-                                            </div>
-                                            <div className="font-black text-slate-900">${(item.amount || 0).toFixed(2)}</div>
-                                        </div>
-                                    ))}
-                                    {!spendReport.rows.length && <div className="p-12 text-center text-slate-300 font-bold uppercase tracking-widest">No transactions in selected range</div>}
-                                </div>
-
-                                {searchItem && (
-                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm animate-in fade-in slide-in-from-bottom-4">
-                                        <h3 className="text-[10px] font-black text-slate-400 mb-6 uppercase tracking-widest">Price Evolution</h3>
-                                        <div className="space-y-4">
-                                            {allLineItems.filter(i => (i.name || '').toLowerCase().includes(searchItem.toLowerCase())).sort((a,b)=>new Date(b.date)-new Date(a.date)).map((li, idx) => (
-                                                <div key={idx} className="flex justify-between border-b border-slate-50 pb-4 last:border-0">
-                                                    <span className="font-bold text-slate-700">{li.name} <span className="text-[10px] text-slate-400 font-normal ml-2">{li.date}</span></span>
-                                                    <span className="font-black text-indigo-600">${Number(li.price).toFixed(2)}</span>
-                                                </div>
-                                            ))}
-                                            {allLineItems.filter(i => (i.name || '').toLowerCase().includes(searchItem.toLowerCase())).length === 0 && <p className="text-center py-4 text-slate-300 font-bold uppercase text-[10px]">No historical matches</p>}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </main>
-
-                    {/* Nav Mobile */}
-                    <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-4 flex justify-around md:hidden z-40 pb-10">
-                        {['dashboard', 'ledger', 'utilities', 'analytics'].map(v => (
-                            <button key={v} onClick={()=>setView(v)} className={`text-[10px] font-black uppercase tracking-widest ${view===v?'text-indigo-600':'text-slate-400'}`}>{v}</button>
-                        ))}
-                    </nav>
-
-                    {/* Modal */}
-                    {activeModal && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-                            <form onSubmit={handleSubmit} className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 space-y-6 shadow-2xl my-auto relative animate-in zoom-in duration-200">
-                                <div className="flex justify-between items-center">
-                                    <h2 className="text-xl font-black uppercase tracking-tighter text-slate-800">{activeModal}</h2>
-                                    <button type="button" onClick={()=>setActiveModal(null)} className="w-10 h-10 flex items-center justify-center bg-slate-50 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all">✕</button>
-                                </div>
-
-                                {activeModal === 'expense' && (
-                                    <div className={`group relative h-40 rounded-[2rem] border-4 border-dashed flex flex-col items-center justify-center transition-all ${aiProcessing?'animate-scan border-indigo-500 bg-indigo-50/50':'border-slate-100 bg-slate-50 hover:border-indigo-400 hover:bg-white cursor-pointer'}`}>
-                                        <input type="file" onChange={e => runAiScanner(e.target.files[0])} className="absolute inset-0 opacity-0 cursor-pointer z-10" accept="image/*,application/pdf" disabled={aiProcessing} />
-                                        <div className="text-center pointer-events-none p-4">
-                                            <div className={`text-base font-black uppercase tracking-tight transition-colors ${aiProcessing ? "text-indigo-600" : "text-slate-400 group-hover:text-indigo-600"}`}>
-                                                {aiProcessing ? "AI Scanning... (Don't Close)" : "📸 SNAP & SCAN"}
-                                            </div>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase mt-2">Automatic Price & Store Detection (Image/PDF)</p>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {errorMsg && <div className="p-5 bg-red-50 border border-red-100 text-red-600 text-[11px] font-bold rounded-2xl shake flex items-center gap-3">
-                                    <span className="text-lg">⚠️</span> {errorMsg}
-                                </div>}
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <Input label="Date" type="date" value={formData.date} onChange={e=>setFormData({...formData, date:e.target.value})} />
-                                    <Input label="Grand Total ($)" type="number" step="0.01" value={formData.amount} onChange={e=>setFormData({...formData, amount:e.target.value})} required />
-                                </div>
-                                <Input label="Merchant / Description" placeholder="Where did you spend?" value={formData.description} onChange={e=>setFormData({...formData, description:e.target.value})} required />
-                                {activeModal === 'expense' && <Input label="Shop Name" placeholder="Store / supermarket" value={formData.shopName} onChange={e=>setFormData({...formData, shopName:e.target.value})} />}
-
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1 tracking-widest">
-                                        {activeModal === 'expense' ? 'Category' : 'Source'}
-                                    </label>
-                                    {activeModal === 'expense' ? (
-                                        <select className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-0 focus:ring-4 focus:ring-indigo-50 appearance-none" value={formData.category} onChange={e=>setFormData({...formData, category:e.target.value})}>
-                                            {CATEGORIES[activeLedger].map(c => <option key={c}>{c}</option>)}
-                                        </select>
-                                    ) : (
-                                        <input className="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border-0 focus:ring-4 focus:ring-indigo-50" placeholder="Who paid?" value={formData.contributor} onChange={e=>setFormData({...formData, contributor:e.target.value})} />
-                                    )}
-                                </div>
-
-                                {formData.lineItems.length > 0 && (
-                                    <div className="p-6 bg-slate-50 rounded-[2rem] space-y-3 max-h-48 overflow-y-auto no-scrollbar border border-slate-100">
-                                        <div className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-[0.2em] border-b pb-2 flex justify-between">
-                                            <span>AI Detected Items</span>
-                                            <span className="text-indigo-600">{formData.lineItems.length} items</span>
-                                        </div>
-                                        {formData.lineItems.map((li, i) => (
-                                            <div key={i} className="flex justify-between text-[11px] font-bold text-slate-600 animate-in slide-in-from-left-2" style={{animationDelay: `${i*50}ms`}}>
-                                                <span className="truncate pr-4">{li.name}</span>
-                                                <span className="text-indigo-600 font-black">${Number(li.price).toFixed(2)}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <button type="submit" disabled={aiProcessing} className={`w-full py-6 text-white rounded-[2.5rem] font-black uppercase text-sm tracking-widest shadow-2xl transition-all ${aiProcessing ? 'bg-slate-300 cursor-not-allowed grayscale' : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700 hover:translate-y-[-2px] active:scale-95'}`}>
-                                    {aiProcessing ? 'Processing...' : 'Securely Commit'}
-                                </button>
-                            </form>
-                        </div>
-                    )}
-                </div>
-            );
-        };
-
-        const Input = ({ label, ...props }) => (
-            <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase ml-1 tracking-widest">{label}</label>
-                <input className="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border-0 focus:ring-4 focus:ring-indigo-50 transition-all placeholder:text-slate-300 text-slate-800" {...props} />
+      } catch (err) { console.error(err); }
+    };
+    initAuth();
+    const unsub = onAuthStateChanged(auth, (u) => { setUser(u); setLoading(false); });
+    return () => unsub();
+  }, []);
+
+  // --- Data Sync ---
+  useEffect(() => {
+    if (!user) return;
+
+    const tPath = collection(db, 'artifacts', appId, 'public', 'data', `transactions_${activeLedger}`);
+    const dPath = collection(db, 'artifacts', appId, 'public', 'data', `deposits_${activeLedger}`);
+    const iPath = collection(db, 'artifacts', appId, 'public', 'data', `items_${activeLedger}`);
+
+    const unsubT = onSnapshot(tPath, (s) => {
+      setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'expense' })));
+    }, (err) => console.error(err));
+
+    const unsubD = onSnapshot(dPath, (s) => {
+      setDeposits(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'deposit' })));
+    }, (err) => console.error(err));
+
+    const unsubI = onSnapshot(iPath, (s) => {
+      setLineItems(s.docs.map(d => ({ ...d.data(), id: d.id })));
+    }, (err) => console.error(err));
+
+    return () => { unsubT(); unsubD(); unsubI(); };
+  }, [user, activeLedger]);
+
+  // --- Computed Stats ---
+  const filteredData = useMemo(() => {
+    const combined = [...transactions, ...deposits];
+    let result = combined;
+    if (globalSearch) {
+      const s = globalSearch.toLowerCase();
+      result = result.filter(i => (i.description?.toLowerCase() || "").includes(s));
+    }
+    return result.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  }, [transactions, deposits, globalSearch]);
+
+  const stats = useMemo(() => {
+    const expenses = filteredData.filter(i => i.type === 'expense');
+    const income = filteredData.filter(i => i.type === 'deposit');
+    const expenseTotal = expenses.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+    const depositTotal = income.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+    
+    return { 
+      balance: depositTotal - expenseTotal, 
+      totalExpenses: expenseTotal, 
+      totalIncome: depositTotal, 
+      count: filteredData.length 
+    };
+  }, [filteredData]);
+
+  // --- Report Generation Logic ---
+  const reports = useMemo(() => {
+    const shopMap = {};
+    lineItems.forEach(item => {
+      const shop = item.merchant || 'Unknown Shop';
+      if (!shopMap[shop]) shopMap[shop] = { total: 0, count: 0 };
+      shopMap[shop].total += (Number(item.price) || 0);
+      shopMap[shop].count += 1;
+    });
+
+    const itemMap = {};
+    lineItems.forEach(item => {
+      const name = item.name?.toLowerCase().trim() || 'Unnamed Item';
+      if (!itemMap[name]) itemMap[name] = { total: 0, count: 0, lastPrice: 0 };
+      itemMap[name].total += (Number(item.price) || 0);
+      itemMap[name].count += 1;
+      itemMap[name].lastPrice = Number(item.price);
+    });
+
+    return {
+      shops: Object.entries(shopMap).sort((a, b) => b[1].total - a[1].total),
+      items: Object.entries(itemMap).sort((a, b) => b[1].count - a[1].count)
+    };
+  }, [lineItems]);
+
+  const handleSaveExpense = async (e) => {
+    if (e) e.preventDefault();
+    if (!user) return;
+    
+    const cleanSplits = activeLedger === LEDGERS.FIXED_COSTS 
+      ? billSplits.filter(s => s.person && s.amount).map(s => ({ ...s, amount: parseFloat(s.amount), paid: !!s.paid }))
+      : [];
+
+    const transData = { 
+      ...formData, 
+      amount: parseFloat(formData.amount) || 0, 
+      ts: Date.now(), 
+      userId: user.uid,
+      splits: cleanSplits
+    };
+
+    try {
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', `transactions_${activeLedger}`), transData);
+      
+      if (formData.items?.length > 0) {
+        const batch = writeBatch(db);
+        formData.items.forEach(item => {
+          const iRef = doc(collection(db, 'artifacts', appId, 'public', 'data', `items_${activeLedger}`));
+          batch.set(iRef, { 
+            ...item, 
+            transactionId: docRef.id, 
+            merchant: formData.description, 
+            date: formData.date, 
+            ts: Date.now(),
+            price: parseFloat(item.price) || 0
+          });
+        });
+        await batch.commit();
+      }
+      
+      setIsAdding(false);
+      setFormData({ date: new Date().toISOString().split('T')[0], description: '', amount: '', category: CATEGORIES[activeLedger][0], items: [] });
+      setBillSplits([{ person: '', amount: '', paid: false }]);
+    } catch (err) {
+      console.error("Save failed:", err);
+    }
+  };
+
+  const toggleSplitPaid = async (transId, splitIndex) => {
+    const trans = transactions.find(t => t.id === transId);
+    if (!trans || !trans.splits) return;
+    
+    const newSplits = [...trans.splits];
+    newSplits[splitIndex].paid = !newSplits[splitIndex].paid;
+    
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', `transactions_${activeLedger}`, transId);
+    await updateDoc(docRef, { splits: newSplits });
+  };
+
+  const runAiScanner = async (file) => {
+    if (!file) return;
+    setAiProcessing(true);
+    setScanError(null);
+    
+    const fetchWithRetry = async (url, options, retries = 5, backoff = 1000) => {
+      try {
+        const res = await fetch(url, options);
+        if (!res.ok) throw new Error(`Status ${res.status}`);
+        return res;
+      } catch (err) {
+        if (retries > 0) {
+          await new Promise(r => setTimeout(r, backoff));
+          return fetchWithRetry(url, options, retries - 1, backoff * 2);
+        }
+        throw err;
+      }
+    };
+
+    try {
+      const reader = new FileReader();
+      const base64Data = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const prompt = `Task: Analyze this receipt image and extract core transaction details.
+      Output Requirements (JSON format only):
+      - merchant: The store or business name (look at the top header).
+      - amount: The final TOTAL amount paid (numeric value only).
+      - category: One of these: ${CATEGORIES[activeLedger].join(', ')}.
+      - date: The purchase date in YYYY-MM-DD format (if found, else omit).
+      - items: An array of objects with "name" and "price" for every line item on the receipt.
+
+      Focus intensely on correctly identifying the MERCHANT name and the TOTAL amount.`;
+
+      const response = await fetchWithRetry(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: file.type, data: base64Data } }] }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
+        }
+      );
+
+      const data = await response.json();
+      const textResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (!textResult) throw new Error("No data returned from AI");
+      
+      const extracted = JSON.parse(textResult);
+
+      // Helper to clean numeric strings (remove $ or text)
+      const cleanAmount = (val) => {
+        if (!val) return "";
+        const cleaned = String(val).replace(/[^0-9.]/g, '');
+        return isNaN(parseFloat(cleaned)) ? "" : cleaned;
+      };
+      
+      setFormData(prev => ({
+        ...prev,
+        description: extracted.merchant || extracted.store || prev.description,
+        amount: cleanAmount(extracted.amount || extracted.total) || prev.amount,
+        date: extracted.date || prev.date,
+        category: CATEGORIES[activeLedger].includes(extracted.category) ? extracted.category : prev.category,
+        items: (extracted.items || []).map(it => ({
+          ...it,
+          price: cleanAmount(it.price)
+        }))
+      }));
+    } catch (err) {
+      console.error("Scanner Error:", err);
+      setScanError("Scan failed. AI couldn't parse the total or merchant. Please check image quality.");
+    } finally {
+      setAiProcessing(false);
+    }
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white font-black tracking-widest text-xs uppercase tracking-[0.3em]">System Booting...</div>;
+
+  return (
+    <div className="flex h-screen bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
+      {/* Sidebar */}
+      <aside className="w-80 bg-white border-r flex flex-col shrink-0">
+        <div className="flex-1 overflow-y-auto p-8 custom-scroll">
+          <div className="flex items-center space-x-3 mb-10">
+            <div className="bg-indigo-600 p-2.5 rounded-2xl text-white shadow-xl shadow-indigo-100"><Wallet size={24} /></div>
+            <div>
+              <h1 className="text-xl font-black tracking-tighter uppercase leading-none">HouseBank</h1>
+              <span className="text-[9px] font-black text-indigo-500 uppercase tracking-[0.2em]">Premium AI 4.0</span>
             </div>
-        );
+          </div>
+          
+          <nav className="space-y-1">
+            <SidebarBtn active={view === 'dashboard'} icon={LayoutDashboard} label="Dashboard" onClick={() => setView('dashboard')} />
+            <SidebarBtn active={view === 'ledger'} icon={Receipt} label="Ledger" onClick={() => setView('ledger')} />
+            <SidebarBtn active={view === 'items'} icon={ShoppingBag} label="Item Analysis" onClick={() => setView('items')} />
+            <SidebarBtn active={view === 'reports'} icon={BarChart3} label="Reporting" onClick={() => setView('reports')} />
+            
+            <div className="pt-8 pb-3 text-[10px] font-black uppercase tracking-widest text-slate-400 px-4">Ledgers</div>
+            <div className="space-y-2">
+              <LedgerTab active={activeLedger === LEDGERS.HOUSEHOLD} label="Household Expenses" onClick={() => setActiveLedger(LEDGERS.HOUSEHOLD)} />
+              <LedgerTab active={activeLedger === LEDGERS.FIXED_COSTS} label="Fixed Utilities" onClick={() => setActiveLedger(LEDGERS.FIXED_COSTS)} />
+            </div>
+          </nav>
+        </div>
+        
+        <div className="shrink-0 p-8 border-t bg-slate-50/50">
+          <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-xl transition-all hover:scale-[1.02]">
+             <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">
+               {activeLedger === LEDGERS.HOUSEHOLD ? 'Household' : 'Fixed'} Net
+             </p>
+             <p className={`text-2xl font-black ${stats.balance < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+               ${stats.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+             </p>
+          </div>
+        </div>
+      </aside>
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <header className="h-24 bg-white border-b flex items-center justify-between px-10 shrink-0">
+          <div className="flex items-center space-x-4">
+             <div className="bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100">
+                <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">{activeLedger.replace('_', ' ')}</span>
+             </div>
+             <div className="relative w-64">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                <input type="text" placeholder="Search records..." className="w-full bg-slate-50 rounded-xl py-2.5 pl-10 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-100" value={globalSearch} onChange={e => setGlobalSearch(e.target.value)} />
+             </div>
+          </div>
+          <div className="flex items-center space-x-3">
+            <button onClick={() => setIsAddingDeposit(true)} className="bg-emerald-50 text-emerald-600 p-3 rounded-xl hover:bg-emerald-100 transition-all" title="Add Income"><ArrowUpCircle size={20} /></button>
+            <button onClick={() => { 
+              setFormData({ date: new Date().toISOString().split('T')[0], description: '', amount: '', category: CATEGORIES[activeLedger][0], items: [] });
+              setScanError(null); 
+              setIsAdding(true); 
+            }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center space-x-2">
+              <Plus size={16} strokeWidth={3} /><span>New Record</span>
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-10 space-y-10 no-scrollbar">
+          {/* LEDGER VIEW */}
+          {view === 'ledger' && (
+            <div className="bg-white rounded-[2rem] border shadow-sm overflow-hidden">
+               <table className="w-full text-left">
+                  <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b">
+                    <tr>
+                      <th className="px-8 py-5">Date</th>
+                      <th className="px-8 py-5">Description & Splits</th>
+                      <th className="px-8 py-5">Amount</th>
+                      <th className="px-8 py-5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filteredData.map(i => {
+                      const unpaidAmount = i.splits ? i.splits.filter(s => !s.paid).reduce((a,c) => a + c.amount, 0) : 0;
+                      return (
+                        <tr key={i.id} className="group hover:bg-slate-50/50">
+                          <td className="px-8 py-5 text-[11px] font-bold text-slate-400">{i.date}</td>
+                          <td className="px-8 py-5">
+                            <div className="flex flex-col space-y-2">
+                              <span className="text-[13px] font-black text-slate-800">
+                                {i.description} 
+                                <span className="ml-2 px-2 py-0.5 bg-slate-100 rounded text-[9px] uppercase tracking-tighter">
+                                  {i.category || 'Income'}
+                                </span>
+                              </span>
+                              {i.splits && i.splits.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {i.splits.map((s, idx) => (
+                                    <button key={idx} onClick={() => toggleSplitPaid(i.id, idx)} className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-all ${s.paid ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-slate-200 text-slate-400 hover:border-indigo-300'}`}>
+                                      {s.paid ? <CheckCircle2 size={10} /> : <Circle size={10} />}
+                                      <span>{s.person}: ${s.amount}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-8 py-5">
+                            <div className="flex flex-col">
+                              <span className={`text-[15px] font-black ${i.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
+                                {i.type === 'expense' ? '-' : '+'}${Number(i.amount).toFixed(2)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-8 py-5 text-right">
+                             <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', `${i.type === 'expense' ? 'transactions' : 'deposits'}_${activeLedger}`, i.id))} className="text-slate-300 hover:text-red-500 transition-colors">
+                               <Trash2 size={16} />
+                             </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+               </table>
+            </div>
+          )}
+
+          {/* REPORTING VIEW */}
+          {view === 'reports' && (
+            <div className="space-y-10">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                  <div className="flex items-center space-x-3 mb-8">
+                    <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><Store size={18}/></div>
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Shop Analysis</h3>
+                  </div>
+                  <div className="space-y-4">
+                    {reports.shops.length > 0 ? reports.shops.map(([shop, data]) => (
+                      <div key={shop} className="flex items-center justify-between group">
+                        <div className="flex-1">
+                          <p className="text-sm font-black text-slate-800">{shop}</p>
+                          <div className="w-full bg-slate-50 h-1.5 rounded-full mt-2 overflow-hidden">
+                            <div className="bg-indigo-500 h-full rounded-full" style={{ width: `${Math.min(100, (data.total / stats.totalExpenses) * 100)}%` }}></div>
+                          </div>
+                        </div>
+                        <div className="text-right pl-6">
+                          <p className="text-sm font-black">${data.total.toFixed(2)}</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase">{data.count} Visits</p>
+                        </div>
+                      </div>
+                    )) : <p className="text-xs text-slate-400 font-bold italic">No scan data available yet.</p>}
+                  </div>
+                </div>
+
+                <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                  <div className="flex items-center space-x-3 mb-8">
+                    <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl"><Tag size={18}/></div>
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Top Frequency Items</h3>
+                  </div>
+                  <div className="space-y-4">
+                    {reports.items.length > 0 ? reports.items.slice(0, 10).map(([item, data]) => (
+                      <div key={item} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 transition-colors">
+                        <div>
+                          <p className="text-sm font-black text-slate-800 capitalize">{item}</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase">Avg Price: ${(data.total / data.count).toFixed(2)}</p>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-black tracking-tighter uppercase">{data.count}x Bought</span>
+                          <p className="text-sm font-black text-slate-900 w-16 text-right">${data.total.toFixed(2)}</p>
+                        </div>
+                      </div>
+                    )) : <p className="text-xs text-slate-400 font-bold italic">Scan receipts to track individual items.</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ITEMS GRID VIEW */}
+          {view === 'items' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+               {lineItems.length > 0 ? lineItems.map(li => (
+                 <div key={li.id} className="bg-white p-6 rounded-3xl border shadow-sm hover:shadow-lg transition-all group">
+                    <div className="flex justify-between items-start mb-3">
+                      <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">{li.merchant}</p>
+                      <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', `items_${activeLedger}`, li.id))} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all"><X size={12}/></button>
+                    </div>
+                    <h4 className="text-sm font-black text-slate-800 mb-2 truncate">{li.name}</h4>
+                    <p className="text-2xl font-black tracking-tighter">${Number(li.price || 0).toFixed(2)}</p>
+                    <p className="text-[9px] font-bold text-slate-300 mt-4 uppercase">{li.date}</p>
+                 </div>
+               )) : (
+                 <div className="col-span-full py-20 text-center">
+                    <ShoppingBag size={48} className="mx-auto text-slate-200 mb-4" />
+                    <p className="text-slate-400 font-bold text-sm">No individual items found. Use the AI Receipt Scanner.</p>
+                 </div>
+               )}
+            </div>
+          )}
+
+          {/* DASHBOARD VIEW */}
+          {view === 'dashboard' && (
+             <div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-10">
+                <StatCard label="Total Spent" value={stats.totalExpenses} icon={TrendingUp} color="indigo" />
+                <StatCard label="Income" value={stats.totalIncome} icon={CreditCard} color="emerald" />
+                <StatCard label="Records" value={stats.count} icon={Activity} color="amber" isCurrency={false} />
+              </div>
+              <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6">Recent Activity ({activeLedger.replace('_', ' ')})</h3>
+                <div className="divide-y">
+                  {filteredData.slice(0, 8).map(i => (
+                    <div key={i.id} className="py-5 flex justify-between items-center">
+                      <div className="flex items-center space-x-4">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm ${i.type === 'deposit' ? 'bg-emerald-50 text-emerald-500' : 'bg-slate-50 text-slate-400'}`}>
+                          {i.type === 'deposit' ? '$' : '🏷️'}
+                        </div>
+                        <div>
+                          <p className="font-black text-sm text-slate-800">{i.description}</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase">{i.date} • {i.category || 'Income'}</p>
+                        </div>
+                      </div>
+                      <p className={`font-black text-sm ${i.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
+                        {i.type === 'expense' ? '-' : '+'}${Number(i.amount).toFixed(2)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* MODALS */}
+      {isAdding && (
+        <Modal title={activeLedger === LEDGERS.FIXED_COSTS ? "Log New Bill" : "Add Expense"} onClose={() => setIsAdding(false)}>
+          <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2 custom-scroll">
+            <div className={`h-28 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all ${aiProcessing ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200 hover:border-indigo-400'} relative overflow-hidden shrink-0`}>
+              <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={e => { if(e.target.files[0]) runAiScanner(e.target.files[0]); }} />
+              {aiProcessing ? (
+                <div className="flex flex-col items-center">
+                  <Loader2 className="animate-spin text-indigo-500 mb-2" size={24} />
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500">AI Extracting...</span>
+                </div>
+              ) : (
+                <>
+                  <Camera className="text-slate-400 mb-2" size={24} />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Scan Receipt with AI</span>
+                </>
+              )}
+            </div>
+
+            {scanError && (
+              <div className="p-4 bg-red-50 text-red-600 rounded-2xl flex items-start gap-3">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <p className="text-[10px] font-bold uppercase tracking-tight">{scanError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveExpense} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                 <Input label="Date" type="date" value={formData.date} onChange={v => setFormData({...formData, date: v})} />
+                 <Input label="Total Amount ($)" type="number" step="0.01" value={formData.amount} onChange={v => setFormData({...formData, amount: v})} />
+              </div>
+              <Input label="Merchant / Store Name" value={formData.description} onChange={v => setFormData({...formData, description: v})} />
+              
+              <div className="space-y-1">
+                 <label className="text-[9px] font-black uppercase text-slate-400 px-2 tracking-widest">Category</label>
+                 <select className="w-full p-4 bg-slate-50 rounded-xl font-bold text-xs border-none outline-none focus:ring-2 focus:ring-indigo-100" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                    {CATEGORIES[activeLedger].map(c => <option key={c} value={c}>{c}</option>)}
+                 </select>
+              </div>
+
+              {/* Items Preview */}
+              {formData.items.length > 0 && (
+                <div className="bg-indigo-50/50 p-5 rounded-3xl border border-indigo-100 space-y-3">
+                  <h4 className="text-[9px] font-black uppercase text-indigo-500 tracking-[0.1em] flex items-center gap-2">
+                    <Sparkles size={12}/> AI Found {formData.items.length} Items
+                  </h4>
+                  <div className="max-h-32 overflow-y-auto space-y-2 pr-2 custom-scroll">
+                    {formData.items.map((it, idx) => (
+                      <div key={idx} className="flex justify-between text-[10px] font-bold text-slate-600">
+                        <span className="truncate flex-1 pr-4">{it.name}</span>
+                        <span className="shrink-0">${Number(it.price).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeLedger === LEDGERS.FIXED_COSTS && (
+                <div className="pt-4 border-t space-y-3">
+                  <div className="flex justify-between items-center px-2">
+                    <label className="text-[9px] font-black uppercase text-indigo-600 tracking-widest flex items-center gap-2">
+                      <Users size={12} /> Split Tracking
+                    </label>
+                    <button type="button" onClick={() => setBillSplits([...billSplits, { person: '', amount: '', paid: false }])} className="text-[9px] font-black uppercase text-indigo-500 hover:text-indigo-700 font-bold">+ Person</button>
+                  </div>
+                  {billSplits.map((s, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <input placeholder="Person" className="flex-1 p-3 bg-slate-50 rounded-xl text-[11px] font-bold outline-none" value={s.person} onChange={e => {
+                        const n = [...billSplits]; n[idx].person = e.target.value; setBillSplits(n);
+                      }} />
+                      <input placeholder="$" type="number" className="w-24 p-3 bg-slate-50 rounded-xl text-[11px] font-bold outline-none" value={s.amount} onChange={e => {
+                        const n = [...billSplits]; n[idx].amount = e.target.value; setBillSplits(n);
+                      }} />
+                      <button type="button" onClick={() => setBillSplits(billSplits.filter((_, i) => i !== idx))} className="p-3 text-slate-300 hover:text-red-500"><X size={14}/></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button type="submit" disabled={aiProcessing} className="w-full py-4 bg-indigo-600 disabled:bg-slate-300 text-white rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl shadow-indigo-100 transition-all mt-4">
+                 Save to Ledger
+              </button>
+            </form>
+          </div>
+        </Modal>
+      )}
+
+      {isAddingDeposit && (
+        <Modal title="Deposit Income" onClose={() => setIsAddingDeposit(false)}>
+           <form onSubmit={async (e) => {
+             e.preventDefault();
+             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', `deposits_${activeLedger}`), {
+               amount: parseFloat(e.target.amount.value) || 0,
+               description: e.target.desc.value,
+               date: new Date().toISOString().split('T')[0],
+               ts: Date.now(),
+               userId: user.uid
+             });
+             setIsAddingDeposit(false);
+           }} className="space-y-4">
+              <Input name="amount" label="Amount ($)" type="number" step="0.01" required />
+              <Input name="desc" label="Source" placeholder="e.g. Salary, Dividend" required />
+              <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px]">Log Deposit</button>
+           </form>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// --- Sub-components ---
+const SidebarBtn = ({ active, icon: Icon, label, onClick }) => (
+  <button onClick={onClick} className={`flex items-center space-x-3 w-full p-3.5 rounded-xl transition-all ${active ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50 font-bold'}`}>
+    <Icon size={16} /> <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
+  </button>
+);
+
+const LedgerTab = ({ active, label, onClick }) => (
+  <button onClick={onClick} className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition-all ${active ? 'border-indigo-600 bg-indigo-50/20' : 'border-transparent bg-slate-50'}`}>
+     <span className={`text-[10px] font-black uppercase ${active ? 'text-indigo-900' : 'text-slate-500'}`}>{label}</span>
+     {active && <ChevronRight size={12} className="text-indigo-600" />}
+  </button>
+);
+
+const StatCard = ({ label, value, icon: Icon, color, isCurrency = true }) => {
+  const colors = { indigo: 'bg-indigo-50 text-indigo-600', emerald: 'bg-emerald-50 text-emerald-600', amber: 'bg-amber-50 text-amber-600' };
+  return (
+    <div className="bg-white p-6 rounded-3xl border shadow-sm flex items-center space-x-5">
+       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${colors[color]}`}><Icon size={24} /></div>
+       <div>
+         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
+         <p className="text-xl font-black tracking-tighter">{isCurrency && '$'}{(value || 0).toLocaleString(undefined, { minimumFractionDigits: isCurrency ? 2 : 0 })}</p>
+       </div>
+    </div>
+  );
+};
+
+const Modal = ({ title, children, onClose }) => (
+  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden">
+      <div className="p-6 border-b flex justify-between items-center">
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">{title}</h3>
+        <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-all"><X size={18}/></button>
+      </div>
+      <div className="p-8">{children}</div>
+    </div>
+  </div>
+);
+
+const Input = ({ label, onChange, ...props }) => (
+  <div className="space-y-1">
+    <label className="text-[9px] font-black uppercase text-slate-400 px-2 tracking-widest">{label}</label>
+    <input 
+      {...props} 
+      onChange={e => onChange ? onChange(e.target.value) : null} 
+      className="w-full p-4 bg-slate-50 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-indigo-100 border-none" 
+    />
+  </div>
+);
+
+export default App;
