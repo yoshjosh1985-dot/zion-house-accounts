@@ -46,11 +46,12 @@
             aside, header, .no-print { display: none !important; }
             main { overflow: visible !important; height: auto !important; display: block !important; padding: 0 !important; margin: 0 !important; }
             .print-full-width { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 20px !important; border: none !important; box-shadow: none !important; }
-            .print-shadow-none { box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
+            .print-shadow-none { box-shadow: none !important; border: 1px solid #e2e8f0 !important; border-radius: 0 !important; }
             .no-scrollbar { overflow: visible !important; }
             * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .grid { display: block !important; }
             .grid > div { margin-bottom: 2rem; page-break-inside: avoid; }
+            .hide-on-print { display: none !important; }
         }
     </style>
 </head>
@@ -140,6 +141,14 @@
             const [timeFilter, setTimeFilter] = useState('all');
             const [focusEntity, setFocusEntity] = useState('all');
 
+            // Print Options
+            const [printOptions, setPrintOptions] = useState({
+                shops: true,
+                credits: true,
+                items: true,
+                summary: true
+            });
+
             const [billSplits, setBillSplits] = useState([{ person: '', amount: '', paid: false }]);
             const [formData, setFormData] = useState({
                 date: new Date().toISOString().split('T')[0],
@@ -190,43 +199,27 @@
 
                 const unsubT = onSnapshot(tPath, (s) => {
                     setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'expense' })));
-                }, (err) => console.error("T Sync Error:", err));
+                });
 
                 const unsubD = onSnapshot(dPath, (s) => {
                     setDeposits(s.docs.map(d => ({ ...d.data(), id: d.id, type: 'deposit' })));
-                }, (err) => console.error("D Sync Error:", err));
+                });
 
                 const unsubI = onSnapshot(iPath, (s) => {
                     setLineItems(s.docs.map(d => ({ ...d.data(), id: d.id })));
-                }, (err) => console.error("I Sync Error:", err));
+                });
 
                 return () => { unsubT(); unsubD(); unsubI(); };
             }, [user, activeLedger, db]);
 
-            const filteredData = useMemo(() => {
-                const combined = [...transactions, ...deposits];
-                let result = combined;
-                if (globalSearch) {
-                    const s = globalSearch.toLowerCase();
-                    result = result.filter(i => (i.description?.toLowerCase() || "").includes(s));
-                }
-                return result.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-            }, [transactions, deposits, globalSearch]);
-
             const stats = useMemo(() => {
                 const expenses = transactions.reduce((a, c) => a + (Number(c.amount) || 0), 0);
                 const income = deposits.reduce((a, c) => a + (Number(c.amount) || 0), 0);
-                return { 
-                    balance: income - expenses, 
-                    totalExpenses: expenses, 
-                    totalIncome: income, 
-                    count: transactions.length + deposits.length 
-                };
+                return { balance: income - expenses, totalExpenses: expenses, totalIncome: income, count: transactions.length + deposits.length };
             }, [transactions, deposits]);
 
             const reports = useMemo(() => {
                 const now = new Date();
-                
                 const filterDate = (dateStr) => {
                     if (timeFilter === 'all') return true;
                     if (!dateStr) return false;
@@ -236,10 +229,7 @@
                     return true;
                 };
 
-                const filterEntity = (desc) => {
-                    if (focusEntity === 'all') return true;
-                    return desc === focusEntity;
-                };
+                const filterEntity = (desc) => (focusEntity === 'all' || desc === focusEntity);
 
                 const repsTrans = transactions.filter(t => filterDate(t.date) && filterEntity(t.description));
                 const repsDeps = deposits.filter(d => filterDate(d.date) && filterEntity(d.description));
@@ -248,11 +238,7 @@
                 const shopMap = {};
                 const creditMap = {};
                 const itemMap = {};
-
-                const allEntities = Array.from(new Set([
-                    ...transactions.map(t => t.description),
-                    ...deposits.map(d => d.description)
-                ])).filter(Boolean).sort();
+                const allEntities = Array.from(new Set([...transactions.map(t => t.description), ...deposits.map(d => d.description)])).filter(Boolean).sort();
 
                 repsTrans.forEach(t => {
                     const shop = t.description || 'Unknown Shop';
@@ -294,8 +280,10 @@
                     : [];
 
                 const transData = { 
-                    ...formData, 
-                    amount: parseFloat(formData.amount) || 0, 
+                    description: formData.description,
+                    amount: parseFloat(formData.amount) || 0,
+                    date: formData.date,
+                    category: formData.category,
                     ts: Date.now(), 
                     userId: user.uid,
                     splits: cleanSplits
@@ -303,18 +291,17 @@
 
                 try {
                     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', `transactions_${activeLedger}`), transData);
-                    
                     if (formData.items?.length > 0) {
                         const batch = writeBatch(db);
                         formData.items.forEach(item => {
                             const iRef = doc(collection(db, 'artifacts', appId, 'public', 'data', `items_${activeLedger}`));
                             batch.set(iRef, { 
-                                ...item, 
+                                name: item.name,
+                                price: parseFloat(item.price) || 0,
                                 transactionId: docRef.id, 
                                 merchant: formData.description, 
                                 date: formData.date, 
-                                ts: Date.now(),
-                                price: parseFloat(item.price) || 0
+                                ts: Date.now()
                             });
                         });
                         await batch.commit();
@@ -325,63 +312,60 @@
                 } catch (err) { console.error("Save failed:", err); }
             };
 
-            const toggleSplitPaid = async (transId, splitIndex) => {
-                const trans = transactions.find(t => t.id === transId);
-                if (!trans || !trans.splits) return;
-                const newSplits = [...trans.splits];
-                newSplits[splitIndex].paid = !newSplits[splitIndex].paid;
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', `transactions_${activeLedger}`, transId), { splits: newSplits });
-            };
-
             const runAiScanner = async (file) => {
                 if (!file) return;
                 setAiProcessing(true);
                 setScanError(null);
                 
                 try {
-                    const base64Data = await new Promise((resolve, reject) => {
-                        const reader = new FileReader();
+                    const reader = new FileReader();
+                    const base64Promise = new Promise((resolve) => {
                         reader.onload = () => resolve(reader.result.split(',')[1]);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(file);
                     });
+                    reader.readAsDataURL(file);
+                    const base64Data = await base64Promise;
 
-                    const prompt = `Extract: merchant, total amount, category (${CATEGORIES[activeLedger].join(', ')}), date (YYYY-MM-DD), and line items (name/price array). JSON only.`;
+                    const systemPrompt = `You are a financial receipt analyzer. Extract high-accuracy data in JSON format.`;
+                    const userPrompt = `Analyze this receipt. Return JSON with fields: merchant (string), total_amount (number), date (YYYY-MM-DD), and items (array of {name: string, price: number}). Match category to one of: ${CATEGORIES[activeLedger].join(', ')}. Ensure numbers are clean decimals.`;
 
                     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: file.type, data: base64Data } }] }],
+                            contents: [{ parts: [{ text: userPrompt }, { inlineData: { mimeType: file.type, data: base64Data } }] }],
+                            systemInstruction: { parts: [{ text: systemPrompt }] },
                             generationConfig: { responseMimeType: "application/json" }
                         })
                     });
 
+                    if (!response.ok) throw new Error("API Connection Error");
                     const data = await response.json();
-                    const extracted = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text);
+                    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    const extracted = JSON.parse(rawText);
                     
                     setFormData(prev => ({
                         ...prev,
-                        description: extracted.merchant || extracted.store || prev.description,
-                        amount: String(extracted.amount || extracted.total).replace(/[^0-9.]/g, '') || prev.amount,
+                        description: extracted.merchant || prev.description,
+                        amount: String(extracted.total_amount || extracted.amount || prev.amount),
                         date: extracted.date || prev.date,
-                        items: (extracted.items || []).map(it => ({ ...it, price: String(it.price).replace(/[^0-9.]/g, '') }))
+                        category: extracted.category || prev.category,
+                        items: (extracted.items || []).map(it => ({ name: it.name, price: String(it.price) }))
                     }));
                 } catch (err) { 
-                    setScanError("AI scan failed. Please check image quality."); 
+                    setScanError("Scan failed. Try a clearer photo."); 
                     console.error("AI Error:", err);
-                }
-                finally { setAiProcessing(false); }
+                } finally { setAiProcessing(false); }
             };
 
-            if (loading) return (
-                <div className="h-screen flex flex-col items-center justify-center bg-slate-900 text-white">
-                    <div className="text-[10px] font-black tracking-[0.5em] uppercase animate-pulse mb-4">Initializing Secure Environment</div>
-                    <div className="w-48 h-1 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="w-1/2 h-full bg-indigo-500 animate-infinite-loading"></div>
-                    </div>
-                </div>
-            );
+            const filteredData = useMemo(() => {
+                const combined = [...transactions, ...deposits];
+                let result = combined;
+                if (globalSearch) {
+                    const s = globalSearch.toLowerCase();
+                    result = result.filter(i => (i.description?.toLowerCase() || "").includes(s));
+                }
+                return result.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+            }, [transactions, deposits, globalSearch]);
 
             return (
                 <div className="flex h-screen bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
@@ -411,10 +395,9 @@
                                 </div>
                             </nav>
                         </div>
-                        
                         <div className="shrink-0 p-8 border-t bg-slate-50/50">
                             <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-xl">
-                                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Current Ledger Net</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Net Balance</p>
                                 <p className={`text-2xl font-black ${stats.balance < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
                                     ${stats.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </p>
@@ -422,7 +405,7 @@
                         </div>
                     </aside>
 
-                    {/* Main */}
+                    {/* Main Content */}
                     <main className="flex-1 flex flex-col overflow-hidden">
                         <header className="h-24 bg-white border-b flex items-center justify-between px-10 shrink-0 no-print">
                             <div className="flex items-center space-x-4">
@@ -431,13 +414,13 @@
                                 </div>
                                 <div className="relative w-64">
                                     <Icon name="Search" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                                    <input type="text" placeholder="Global search..." className="w-full bg-slate-50 rounded-xl py-2.5 pl-10 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-100" value={globalSearch} onChange={e => setGlobalSearch(e.target.value)} />
+                                    <input type="text" placeholder="Search entries..." className="w-full bg-slate-50 rounded-xl py-2.5 pl-10 pr-4 text-xs font-bold outline-none" value={globalSearch} onChange={e => setGlobalSearch(e.target.value)} />
                                 </div>
                             </div>
                             <div className="flex items-center space-x-3">
                                 <button onClick={() => setIsAddingDeposit(true)} className="bg-emerald-50 text-emerald-600 p-3 rounded-xl hover:bg-emerald-100 transition-all"><Icon name="ArrowUpCircle" size={20} /></button>
-                                <button onClick={() => { setIsAdding(true); setScanError(null); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center space-x-2">
-                                    <Icon name="Plus" size={16} strokeWidth={3} /><span>Add Transaction</span>
+                                <button onClick={() => setIsAdding(true)} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center space-x-2">
+                                    <Icon name="Plus" size={16} strokeWidth={3} /><span>Add Expense</span>
                                 </button>
                             </div>
                         </header>
@@ -446,12 +429,12 @@
                             {view === 'dashboard' && (
                                 <div className="space-y-10">
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                        <StatCard label="Total Out" value={stats.totalExpenses} icon="TrendingUp" color="indigo" />
-                                        <StatCard label="Total In" value={stats.totalIncome} icon="CreditCard" color="emerald" />
-                                        <StatCard label="Activity Count" value={stats.count} icon="Activity" color="amber" isCurrency={false} />
+                                        <StatCard label="Total Spent" value={stats.totalExpenses} icon="TrendingUp" color="indigo" />
+                                        <StatCard label="Total Income" value={stats.totalIncome} icon="CreditCard" color="emerald" />
+                                        <StatCard label="Total Transactions" value={stats.count} icon="Activity" color="amber" isCurrency={false} />
                                     </div>
                                     <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
-                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 px-2">Recent Timeline</h3>
+                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 px-2">Recent Activity</h3>
                                         <div className="divide-y">
                                             {filteredData.slice(0, 8).map(i => (
                                                 <div key={i.id} className="py-5 flex justify-between items-center group px-2">
@@ -461,7 +444,7 @@
                                                         </div>
                                                         <div>
                                                             <p className="font-black text-sm text-slate-800">{i.description}</p>
-                                                            <p className="text-[9px] font-bold text-slate-400 uppercase">{i.date} • {i.category || 'Credit'}</p>
+                                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{i.date} • {i.category || 'Income'}</p>
                                                         </div>
                                                     </div>
                                                     <p className={`font-black text-sm ${i.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
@@ -469,9 +452,6 @@
                                                     </p>
                                                 </div>
                                             ))}
-                                            {filteredData.length === 0 && (
-                                                <div className="py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">No history found</div>
-                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -479,13 +459,14 @@
 
                             {view === 'ledger' && (
                                 <div className="bg-white rounded-[2rem] border shadow-sm overflow-hidden">
-                                    <table className="w-full text-left">
+                                    <table className="w-full text-left border-collapse">
                                         <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b">
                                             <tr>
                                                 <th className="px-8 py-5">Date</th>
-                                                <th className="px-8 py-5">Merchant / Details</th>
+                                                <th className="px-8 py-5">Entity</th>
+                                                <th className="px-8 py-5">Category</th>
                                                 <th className="px-8 py-5">Amount</th>
-                                                <th className="px-8 py-5 text-right">Delete</th>
+                                                <th className="px-8 py-5 text-right no-print">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y">
@@ -493,26 +474,17 @@
                                                 <tr key={i.id} className="group hover:bg-slate-50/50">
                                                     <td className="px-8 py-5 text-[11px] font-bold text-slate-400">{i.date}</td>
                                                     <td className="px-8 py-5">
-                                                        <div className="flex flex-col space-y-2">
-                                                            <span className="text-[13px] font-black text-slate-800 uppercase tracking-tight">{i.description}</span>
-                                                            {i.splits && i.splits.length > 0 && (
-                                                                <div className="flex flex-wrap gap-2">
-                                                                    {i.splits.map((s, idx) => (
-                                                                        <button key={idx} onClick={() => toggleSplitPaid(i.id, idx)} className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-all ${s.paid ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-slate-200 text-slate-400 hover:border-indigo-300'}`}>
-                                                                            <Icon name={s.paid ? "CheckCircle2" : "Circle"} size={10} />
-                                                                            <span>{s.person}: ${s.amount}</span>
-                                                                        </button>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </div>
+                                                        <span className="text-[13px] font-black text-slate-800 uppercase">{i.description}</span>
                                                     </td>
                                                     <td className="px-8 py-5">
-                                                        <span className={`text-[15px] font-black ${i.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
+                                                        <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{i.category || 'N/A'}</span>
+                                                    </td>
+                                                    <td className="px-8 py-5">
+                                                        <span className={`text-sm font-black ${i.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
                                                             {i.type === 'expense' ? '-' : '+'}${Number(i.amount).toFixed(2)}
                                                         </span>
                                                     </td>
-                                                    <td className="px-8 py-5 text-right">
+                                                    <td className="px-8 py-5 text-right no-print">
                                                         <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', `${i.type === 'expense' ? 'transactions' : 'deposits'}_${activeLedger}`, i.id))} className="text-slate-200 hover:text-red-500"><Icon name="Trash2" size={16} /></button>
                                                     </td>
                                                 </tr>
@@ -523,192 +495,148 @@
                             )}
 
                             {view === 'items' && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
                                     {lineItems.map(li => (
-                                        <div key={li.id} className="bg-white p-6 rounded-3xl border shadow-sm group hover:shadow-lg transition-all">
+                                        <div key={li.id} className="bg-white p-6 rounded-3xl border shadow-sm group">
                                             <div className="flex justify-between items-start mb-3">
                                                 <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">{li.merchant}</p>
                                                 <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', `items_${activeLedger}`, li.id))} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500"><Icon name="X" size={12}/></button>
                                             </div>
-                                            <h4 className="text-sm font-black text-slate-800 mb-2 truncate">{li.name}</h4>
+                                            <h4 className="text-sm font-black text-slate-800 mb-1 truncate">{li.name}</h4>
                                             <p className="text-2xl font-black tracking-tighter">${Number(li.price || 0).toFixed(2)}</p>
                                             <p className="text-[9px] font-bold text-slate-300 mt-4 uppercase">{li.date}</p>
                                         </div>
                                     ))}
-                                    {lineItems.length === 0 && (
-                                        <div className="col-span-full py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">No line items stored</div>
-                                    )}
                                 </div>
                             )}
 
                             {view === 'reports' && (
-                                <div className="space-y-8 print-full-width">
-                                    <div className="flex flex-col gap-6 no-print">
-                                        <div className="flex flex-wrap items-center gap-4">
-                                            <div className="flex space-x-1 bg-white p-1 rounded-2xl border shadow-sm">
-                                                {['all', 'month', 'year'].map(tf => (
-                                                    <button
-                                                        key={tf}
-                                                        onClick={() => setTimeFilter(tf)}
-                                                        className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${timeFilter === tf ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}
-                                                    >
-                                                        {tf === 'all' ? 'All Time' : tf === 'month' ? 'This Month' : 'This Year'}
-                                                    </button>
-                                                ))}
-                                            </div>
-
-                                            <div className="flex items-center space-x-2 bg-white p-1 rounded-2xl border shadow-sm min-w-[240px]">
-                                                <div className="pl-3 text-slate-400"><Icon name="Filter" size={14}/></div>
-                                                <select 
-                                                    value={focusEntity}
-                                                    onChange={(e) => setFocusEntity(e.target.value)}
-                                                    className="w-full bg-transparent p-2 text-[10px] font-black uppercase tracking-widest text-slate-600 outline-none appearance-none cursor-pointer"
-                                                >
-                                                    <option value="all">Focus: All Entities</option>
-                                                    <optgroup label="Shops / Sources">
-                                                        {reports.availableEntities.map(ent => (
-                                                            <option key={ent} value={ent}>{ent}</option>
-                                                        ))}
-                                                    </optgroup>
-                                                </select>
-                                                <div className="pr-2 pointer-events-none text-slate-300"><Icon name="ChevronDown" size={14}/></div>
-                                            </div>
-
-                                            <button onClick={() => window.print()} className="ml-auto flex items-center space-x-2 bg-slate-900 text-white px-8 py-3.5 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-800 transition-colors shadow-lg">
-                                                <Icon name="Printer" size={16} /> <span>Print {focusEntity !== 'all' ? 'Statement' : 'Report'}</span>
+                                <div className="space-y-8">
+                                    {/* Print Controls */}
+                                    <div className="bg-white p-8 rounded-[2rem] border shadow-sm no-print space-y-6">
+                                        <div className="flex items-center justify-between border-b pb-6">
+                                            <h3 className="text-sm font-black uppercase tracking-widest">Report Configuration</h3>
+                                            <button onClick={() => window.print()} className="bg-slate-900 text-white px-8 py-3.5 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-lg flex items-center gap-2">
+                                                <Icon name="Printer" size={16}/> Print PDF Statement
                                             </button>
                                         </div>
                                         
-                                        {focusEntity !== 'all' && (
-                                            <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex items-center justify-between animate-in slide-in-from-top-2">
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">
-                                                    Currently focusing on: <span className="text-indigo-900">{focusEntity}</span>
-                                                </p>
-                                                <button onClick={() => setFocusEntity('all')} className="text-[10px] font-black uppercase text-indigo-400 hover:text-indigo-600">Clear Focus</button>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                                            <div className="space-y-4">
+                                                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Timeframe</label>
+                                                <div className="flex gap-2">
+                                                    {['all', 'month', 'year'].map(tf => (
+                                                        <button key={tf} onClick={() => setTimeFilter(tf)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${timeFilter === tf ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}>
+                                                            {tf}
+                                                        </button>
+                                                    ))}
+                                                </div>
                                             </div>
-                                        )}
-                                    </div>
 
-                                    <div className="bg-white p-10 rounded-[3rem] border shadow-sm print-shadow-none print-full-width">
-                                        <div className="mb-10 border-b pb-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
-                                            <div>
-                                                <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none">
-                                                    {focusEntity !== 'all' ? focusEntity : 'Financial Summary'}
-                                                </h2>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
-                                                    {timeFilter === 'all' ? 'Lifetime Analysis' : timeFilter === 'month' ? 'Monthly Breakdown' : 'Annual Breakdown'} • {activeLedger.replace('_', ' ')}
-                                                </p>
-                                                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-1">
-                                                    Statement generated {new Date().toLocaleDateString()}
-                                                </p>
+                                            <div className="space-y-4">
+                                                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Entity Filter</label>
+                                                <select value={focusEntity} onChange={e => setFocusEntity(e.target.value)} className="w-full p-3.5 bg-slate-50 border-none rounded-xl text-[10px] font-black uppercase outline-none">
+                                                    <option value="all">All Shops/Sources</option>
+                                                    {reports.availableEntities.map(ent => <option key={ent} value={ent}>{ent}</option>)}
+                                                </select>
                                             </div>
-                                            
-                                            <div className="grid grid-cols-3 gap-8 bg-slate-50 p-8 rounded-[2rem] border border-slate-100 min-w-[400px]">
-                                                <div>
-                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Inbound</p>
-                                                    <p className="text-xl font-black text-emerald-500 tracking-tight">${reports.totalIn.toFixed(2)}</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Outbound</p>
-                                                    <p className="text-xl font-black text-indigo-500 tracking-tight">${reports.totalOut.toFixed(2)}</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Net Flow</p>
-                                                    <p className={`text-xl font-black tracking-tight ${(reports.totalIn - reports.totalOut) >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                                                        ${(reports.totalIn - reports.totalOut).toFixed(2)}
-                                                    </p>
+
+                                            <div className="space-y-4">
+                                                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Include Sections</label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {Object.entries(printOptions).map(([key, val]) => (
+                                                        <button key={key} onClick={() => setPrintOptions(p => ({...p, [key]: !val}))} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase border transition-all ${val ? 'bg-indigo-50 border-indigo-100 text-indigo-600' : 'bg-white border-slate-100 text-slate-300'}`}>
+                                                            {key}
+                                                        </button>
+                                                    ))}
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
 
-                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 print-full-width">
-                                            <div className={focusEntity !== 'all' && reports.totalOut > 0 ? 'lg:col-span-2' : ''}>
-                                                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800 mb-8 flex items-center gap-3">
-                                                    <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600"><Icon name="Store" size={16}/></div> 
-                                                    {focusEntity !== 'all' ? 'Transaction History' : 'Spending by Entity'}
-                                                </h3>
-                                                <div className="space-y-4">
-                                                    {reports.shops.length > 0 ? (
-                                                        focusEntity !== 'all' ? (
-                                                            <div className="space-y-3">
-                                                                {transactions.filter(t => t.description === focusEntity).map((t, idx) => (
-                                                                    <div key={idx} className="flex items-center justify-between p-5 rounded-2xl bg-slate-50 border border-slate-100 group">
-                                                                        <div>
-                                                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.date}</p>
-                                                                            <p className="text-sm font-black text-slate-800 uppercase mt-0.5">{t.category}</p>
-                                                                        </div>
-                                                                        <p className="text-base font-black text-indigo-600">-${Number(t.amount).toFixed(2)}</p>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        ) : (
-                                                            reports.shops.map(([shop, data]) => (
-                                                                <div key={shop} className="flex items-center justify-between p-5 rounded-2xl bg-slate-50 border border-slate-100 hover:border-indigo-200 transition-colors">
-                                                                    <div className="flex-1">
-                                                                        <p className="text-sm font-black text-slate-800 truncate pr-4 uppercase tracking-tight">{shop}</p>
-                                                                        <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">{data.count} Payments Recorded</p>
-                                                                    </div>
-                                                                    <p className="text-base font-black text-indigo-600 shrink-0">${data.total.toFixed(2)}</p>
-                                                                </div>
-                                                            ))
-                                                        )
-                                                    ) : <p className="text-[10px] text-slate-300 font-black italic">No expenditure history found for this criteria.</p>}
+                                    {/* Printable Report Surface */}
+                                    <div className="bg-white p-12 rounded-[3rem] border shadow-sm print-shadow-none print-full-width min-h-[1000px]">
+                                        <div className="border-b pb-12 mb-12 flex justify-between items-end">
+                                            <div>
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <div className="bg-slate-900 text-white p-2 rounded-lg"><Icon name="Wallet" size={20}/></div>
+                                                    <h2 className="text-2xl font-black uppercase tracking-tighter">Financial Statement</h2>
                                                 </div>
+                                                <p className="text-[11px] font-black text-indigo-500 uppercase tracking-widest">
+                                                    {activeLedger.replace('_', ' ')} • {timeFilter === 'all' ? 'Lifetime Analysis' : `Analysis: ${timeFilter}`}
+                                                </p>
+                                                <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Generated: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
                                             </div>
-
-                                            { (focusEntity === 'all' || reports.totalIn > 0) && (
-                                                <div className={focusEntity !== 'all' && reports.totalIn > 0 ? 'lg:col-span-2' : ''}>
-                                                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800 mb-8 flex items-center gap-3">
-                                                        <div className="bg-emerald-100 p-2 rounded-lg text-emerald-600"><Icon name="ArrowDownLeft" size={16}/></div>
-                                                        {focusEntity !== 'all' ? 'Credit History' : 'Income Streams'}
-                                                    </h3>
-                                                    <div className="space-y-4">
-                                                        {reports.credits.length > 0 ? (
-                                                            focusEntity !== 'all' ? (
-                                                                <div className="space-y-3">
-                                                                    {deposits.filter(d => d.description === focusEntity).map((d, idx) => (
-                                                                        <div key={idx} className="flex items-center justify-between p-5 rounded-2xl bg-emerald-50/30 border border-emerald-100/50 group">
-                                                                            <div>
-                                                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{d.date}</p>
-                                                                                <p className="text-sm font-black text-slate-800 uppercase mt-0.5">Deposit Received</p>
-                                                                            </div>
-                                                                            <p className="text-base font-black text-emerald-600">+${Number(d.amount).toFixed(2)}</p>
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            ) : (
-                                                                reports.credits.map(([source, data]) => (
-                                                                    <div key={source} className="flex items-center justify-between p-5 rounded-2xl bg-emerald-50/50 border border-emerald-100/50">
-                                                                        <div className="flex-1">
-                                                                            <p className="text-sm font-black text-slate-800 truncate pr-4 uppercase tracking-tight">{source}</p>
-                                                                            <p className="text-[9px] font-bold text-emerald-500 uppercase mt-0.5">{data.count} Deposits Received</p>
-                                                                        </div>
-                                                                        <p className="text-base font-black text-emerald-600 shrink-0">+${data.total.toFixed(2)}</p>
-                                                                    </div>
-                                                                ))
-                                                            )
-                                                        ) : <p className="text-[10px] text-slate-300 font-black italic">No income history found for this criteria.</p>}
+                                            {printOptions.summary && (
+                                                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 grid grid-cols-2 gap-8 min-w-[300px]">
+                                                    <div>
+                                                        <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Total Inbound</p>
+                                                        <p className="text-xl font-black text-emerald-600 tracking-tight">${reports.totalIn.toFixed(2)}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Total Outbound</p>
+                                                        <p className="text-xl font-black text-indigo-600 tracking-tight">${reports.totalOut.toFixed(2)}</p>
                                                     </div>
                                                 </div>
                                             )}
+                                        </div>
 
-                                            <div className="lg:col-span-2 pt-10 border-t mt-4">
-                                                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800 mb-8 flex items-center gap-3">
-                                                    <div className="bg-amber-100 p-2 rounded-lg text-amber-600"><Icon name="Tag" size={16}/></div>
-                                                    Itemized Purchase Frequency
-                                                </h3>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                    {reports.items.length > 0 ? reports.items.slice(0, 30).map(([item, data]) => (
-                                                        <div key={item} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-xs font-black text-slate-800 capitalize truncate pr-2">{item}</p>
-                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{data.count} Purchased</p>
+                                        <div className="space-y-16">
+                                            {printOptions.shops && reports.shops.length > 0 && (
+                                                <section className="page-break-inside-avoid">
+                                                    <h3 className="text-[12px] font-black uppercase tracking-[0.2em] border-l-4 border-indigo-600 pl-4 mb-8 text-slate-900">Expense Breakdown by Shop</h3>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {reports.shops.map(([shop, data]) => (
+                                                            <div key={shop} className="flex justify-between p-5 rounded-2xl bg-slate-50 border border-slate-100">
+                                                                <div>
+                                                                    <p className="text-sm font-black text-slate-800 uppercase tracking-tight">{shop}</p>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mt-1">{data.count} Payments</p>
+                                                                </div>
+                                                                <p className="text-lg font-black text-indigo-600">-${data.total.toFixed(2)}</p>
                                                             </div>
-                                                            <p className="text-sm font-black text-slate-900 shrink-0">${data.total.toFixed(2)}</p>
-                                                        </div>
-                                                    )) : <p className="text-[10px] text-slate-300 font-black col-span-full italic">No detailed item logs for this selection.</p>}
-                                                </div>
-                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            )}
+
+                                            {printOptions.credits && reports.credits.length > 0 && (
+                                                <section className="page-break-inside-avoid">
+                                                    <h3 className="text-[12px] font-black uppercase tracking-[0.2em] border-l-4 border-emerald-500 pl-4 mb-8 text-slate-900">Income Stream Summary</h3>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {reports.credits.map(([source, data]) => (
+                                                            <div key={source} className="flex justify-between p-5 rounded-2xl bg-emerald-50/20 border border-emerald-100/50">
+                                                                <div>
+                                                                    <p className="text-sm font-black text-slate-800 uppercase tracking-tight">{source}</p>
+                                                                    <p className="text-[9px] font-bold text-emerald-500 uppercase mt-1">{data.count} Deposits</p>
+                                                                </div>
+                                                                <p className="text-lg font-black text-emerald-600">+${data.total.toFixed(2)}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            )}
+
+                                            {printOptions.items && reports.items.length > 0 && (
+                                                <section className="page-break-inside-avoid">
+                                                    <h3 className="text-[12px] font-black uppercase tracking-[0.2em] border-l-4 border-amber-500 pl-4 mb-8 text-slate-900">Purchase Item Frequency</h3>
+                                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                                        {reports.items.slice(0, 40).map(([item, data]) => (
+                                                            <div key={item} className="p-4 rounded-xl bg-slate-50 border border-slate-100">
+                                                                <p className="text-[10px] font-black text-slate-800 uppercase truncate mb-1">{item}</p>
+                                                                <div className="flex justify-between items-baseline">
+                                                                    <p className="text-[9px] font-bold text-slate-400">{data.count}x</p>
+                                                                    <p className="text-xs font-black text-slate-900">${data.total.toFixed(2)}</p>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            )}
+                                        </div>
+
+                                        <div className="mt-20 pt-10 border-t border-dashed flex justify-between items-center opacity-50">
+                                            <p className="text-[9px] font-black uppercase tracking-[0.5em]">HouseBank Security Verified</p>
+                                            <p className="text-[9px] font-black uppercase">Ref: {crypto.randomUUID().split('-')[0].toUpperCase()}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -716,13 +644,14 @@
                         </div>
                     </main>
 
+                    {/* Modals */}
                     {isAdding && (
-                        <Modal title={`Add to ${activeLedger.split('_')[0]}`} onClose={() => setIsAdding(false)}>
-                            <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2 no-scrollbar">
-                                <div className={`h-28 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center relative overflow-hidden ${aiProcessing ? 'bg-indigo-50 border-indigo-200 animate-scan' : 'bg-slate-50 border-slate-100'}`}>
+                        <Modal title={`New ${activeLedger.split('_')[0]} Expense`} onClose={() => setIsAdding(false)}>
+                            <div className="space-y-6 max-h-[70vh] overflow-y-auto no-scrollbar">
+                                <div className={`h-28 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center relative overflow-hidden transition-all ${aiProcessing ? 'bg-indigo-50 border-indigo-200 animate-scan' : 'bg-slate-50 border-slate-100 hover:border-indigo-200'}`}>
                                     <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={e => runAiScanner(e.target.files[0])} />
                                     {aiProcessing ? <Icon name="Loader2" className="animate-spin text-indigo-500" /> : <Icon name="Camera" className="text-slate-300" />}
-                                    <p className="text-[10px] font-black text-indigo-500 uppercase mt-2">{aiProcessing ? 'AI Processing...' : 'Scan Receipt'}</p>
+                                    <p className="text-[10px] font-black text-indigo-500 uppercase mt-2 tracking-widest">{aiProcessing ? 'Processing Receipt...' : 'Quick Scan Receipt'}</p>
                                 </div>
                                 {scanError && <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-[10px] font-bold text-center">⚠️ {scanError}</div>}
                                 <form onSubmit={handleSaveExpense} className="space-y-4">
@@ -731,42 +660,33 @@
                                         <Input label="Total ($)" type="number" step="0.01" value={formData.amount} onChange={v => setFormData({...formData, amount: v})} />
                                     </div>
                                     <Input label="Merchant" value={formData.description} onChange={v => setFormData({...formData, description: v})} />
+                                    <div className="space-y-1 px-2">
+                                        <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Category</label>
+                                        <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full p-4 bg-slate-50 rounded-xl font-bold text-xs outline-none">
+                                            {CATEGORIES[activeLedger].map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
                                     
                                     {formData.items.length > 0 && (
-                                        <div className="bg-indigo-50/50 p-4 rounded-2xl space-y-2 border border-indigo-100">
-                                            <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">Extracted Items</p>
+                                        <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100 space-y-2">
+                                            <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest mb-2">Itemized extraction</p>
                                             {formData.items.map((it, idx) => (
-                                                <div key={idx} className="flex justify-between text-[10px] font-bold text-slate-600">
-                                                    <span className="truncate flex-1">{it.name}</span>
-                                                    <span className="shrink-0">${Number(it.price).toFixed(2)}</span>
+                                                <div key={idx} className="flex justify-between items-center text-[10px] font-bold text-slate-600 border-b border-indigo-100/50 pb-2 last:border-0 last:pb-0">
+                                                    <span className="truncate flex-1 mr-4">{it.name}</span>
+                                                    <span className="shrink-0 text-indigo-600 font-black">${Number(it.price).toFixed(2)}</span>
                                                 </div>
                                             ))}
                                         </div>
                                     )}
 
-                                    {activeLedger === LEDGERS.FIXED_COSTS && (
-                                        <div className="pt-4 border-t space-y-3">
-                                            <div className="flex justify-between items-center">
-                                                <label className="text-[9px] font-black uppercase text-indigo-600 tracking-widest">Split Billing</label>
-                                                <button type="button" onClick={() => setBillSplits([...billSplits, { person: '', amount: '', paid: false }])} className="text-[9px] font-black text-indigo-400">+ Add</button>
-                                            </div>
-                                            {billSplits.map((s, idx) => (
-                                                <div key={idx} className="flex gap-2">
-                                                    <input placeholder="Name" className="flex-1 p-3 bg-slate-50 rounded-xl text-[11px] font-bold outline-none" value={s.person} onChange={e => { const n = [...billSplits]; n[idx].person = e.target.value; setBillSplits(n); }} />
-                                                    <input placeholder="$" type="number" className="w-24 p-3 bg-slate-50 rounded-xl text-[11px] font-bold outline-none" value={s.amount} onChange={e => { const n = [...billSplits]; n[idx].amount = e.target.value; setBillSplits(n); }} />
-                                                    <button type="button" onClick={() => setBillSplits(billSplits.filter((_, i) => i !== idx))} className="p-3 text-slate-300 hover:text-red-500"><Icon name="X" size={14}/></button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl">Confirm & Save</button>
+                                    <button type="submit" disabled={aiProcessing} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl disabled:opacity-50">Secure Save</button>
                                 </form>
                             </div>
                         </Modal>
                     )}
 
                     {isAddingDeposit && (
-                        <Modal title="Add Income" onClose={() => setIsAddingDeposit(false)}>
+                        <Modal title="Record Inbound Credit" onClose={() => setIsAddingDeposit(false)}>
                             <form onSubmit={async (e) => {
                                 e.preventDefault();
                                 const amount = parseFloat(e.target.amount.value) || 0;
@@ -776,9 +696,9 @@
                                 });
                                 setIsAddingDeposit(false);
                             }} className="space-y-4">
-                                <Input name="amount" label="Amount ($)" type="number" step="0.01" required />
-                                <Input name="desc" label="Source" required />
-                                <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px]">Record Income</button>
+                                <Input name="amount" label="Credit Amount ($)" type="number" step="0.01" required />
+                                <Input name="desc" label="Source Description" required />
+                                <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px]">Verify & Credit</button>
                             </form>
                         </Modal>
                     )}
@@ -794,7 +714,7 @@
 
         const LedgerTab = ({ active, label, onClick }) => (
             <button onClick={onClick} className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition-all ${active ? 'border-indigo-600 bg-indigo-50/20' : 'border-transparent bg-slate-50'}`}>
-                <span className={`text-[10px] font-black uppercase ${active ? 'text-indigo-900' : 'text-slate-500'}`}>{label}</span>
+                <span className={`text-[10px] font-black uppercase tracking-tight ${active ? 'text-indigo-900' : 'text-slate-500'}`}>{label}</span>
                 {active && <Icon name="ChevronRight" size={12} className="text-indigo-600" />}
             </button>
         );
@@ -813,11 +733,11 @@
         };
 
         const Modal = ({ title, children, onClose }) => (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 no-print">
-                <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
                     <div className="p-6 border-b flex justify-between items-center px-8">
                         <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">{title}</h3>
-                        <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full"><Icon name="X" size={18}/></button>
+                        <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><Icon name="X" size={18}/></button>
                     </div>
                     <div className="p-8">{children}</div>
                 </div>
@@ -827,7 +747,7 @@
         const Input = ({ label, onChange, ...props }) => (
             <div className="space-y-1">
                 <label className="text-[9px] font-black uppercase text-slate-400 px-2 tracking-widest">{label}</label>
-                <input {...props} onChange={e => onChange ? onChange(e.target.value) : null} className="w-full p-4 bg-slate-50 rounded-xl font-bold text-xs outline-none border-none focus:ring-2 focus:ring-indigo-100" />
+                <input {...props} onChange={e => onChange ? onChange(e.target.value) : null} className="w-full p-4 bg-slate-50 rounded-xl font-bold text-xs outline-none border-none focus:ring-2 focus:ring-indigo-100 transition-all" />
             </div>
         );
 
