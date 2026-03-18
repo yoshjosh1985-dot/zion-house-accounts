@@ -14,6 +14,7 @@
     
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
     <!-- Firebase SDKs (Compat version for simplicity) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -69,7 +70,7 @@
                 appId: "1:645556460544:web:f7d822278af64654918ce5"
             };
 
-        const apiKey = ""; // API Key for Gemini
+        const apiKey = typeof __gemini_api_key !== 'undefined' ? __gemini_api_key : ""; // API Key for Gemini
         const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'home-accounting-v1';
 
         if (!firebase.apps.length) {
@@ -99,7 +100,57 @@
             });
         };
 
+        const normalizeDate = (value) => {
+            if (!value) return new Date().toISOString().split('T')[0];
+            if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+            const parsed = new Date(value);
+            if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
+            const match = String(value).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+            if (match) {
+                let [, month, day, year] = match;
+                if (year.length === 2) year = `20${year}`;
+                return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            }
+            return new Date().toISOString().split('T')[0];
+        };
+
+        const extractReceiptDetailsFromText = (text, mode) => {
+            const cleanText = text.replace(/\r/g, '');
+            const lines = cleanText.split('\n').map(line => line.trim()).filter(Boolean);
+            const totalMatches = [...cleanText.matchAll(/(?:total|amount due|balance due|grand total|net amount|due)\D{0,15}(\d+[\.,]\d{2})/gi)];
+            const fallbackAmountMatches = [...cleanText.matchAll(/\b(\d+[\.,]\d{2})\b/g)]
+                .map(match => parseFloat(match[1].replace(',', '.')))
+                .filter(value => value > 1);
+            const total = totalMatches.length > 0
+                ? parseFloat(totalMatches[totalMatches.length - 1][1].replace(',', '.'))
+                : (fallbackAmountMatches.length ? Math.max(...fallbackAmountMatches) : 0);
+            const vendor = lines[0] || (mode === 'utility' ? 'Utility Bill' : 'Receipt Scan');
+            const dateMatch = cleanText.match(/(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2})/);
+            const utilityKeywords = /(utility|electric|water|power|energy|gas|internet|telecom|sewer)/i;
+            return {
+                total: total || '',
+                vendor,
+                date: normalizeDate(dateMatch ? dateMatch[1] : ''),
+                isUtility: mode === 'utility' || utilityKeywords.test(cleanText)
+            };
+        };
+
+        const runLocalReceiptScan = async (file, mode) => {
+            if (!window.Tesseract) throw new Error('Tesseract OCR library unavailable');
+            const { data } = await window.Tesseract.recognize(file, 'eng');
+            return extractReceiptDetailsFromText(data.text || '', mode);
+        };
+
+        const getLinkedAmountForShare = (incomeLogs, billId, personIndex) => {
+            return incomeLogs.reduce((sum, income) => (
+                sum + (income.linkedBills || [])
+                    .filter(link => link.billId === billId && link.personIndex === personIndex)
+                    .reduce((subtotal, link) => subtotal + (parseFloat(link.amount) || 0), 0)
+            ), 0);
+        };
+
         const callGeminiWithRetry = async (payload, retries = 5) => {
+            if (!apiKey) throw new Error('Gemini API key not configured');
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
             for (let i = 0; i < retries; i++) {
                 try {
@@ -156,8 +207,21 @@
             );
         }
 
-        function TransactionList({ type, transactions, onDelete, setViewReceipt, onTogglePaid }) {
+        function TransactionList({ type, transactions, onDelete, setViewReceipt, onTogglePaid, incomeLogs = [] }) {
             const filtered = transactions.filter(t => t.category === type).sort((a,b) => new Date(b.date) - new Date(a.date));
+            const linkedPaymentsByBill = incomeLogs.reduce((acc, income) => {
+                (income.linkedBills || []).forEach(link => {
+                    acc[link.billId] = acc[link.billId] || [];
+                    acc[link.billId].push({
+                        payer: income.payer || income.description,
+                        personName: link.personName,
+                        personIndex: link.personIndex,
+                        amount: parseFloat(link.amount || 0),
+                        date: income.date
+                    });
+                });
+                return acc;
+            }, {});
             if(filtered.length === 0) return <div className="text-center mt-20 text-slate-300 font-bold uppercase text-xs">No records found.</div>;
             return (
                 <div className="space-y-6">
@@ -187,6 +251,37 @@
                                     ))}
                                 </div>
                             )}
+                            {tx.category === 'Utilities' && tx.isSplit && tx.splitData && (
+                                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {tx.splitData.map((p, idx) => {
+                                        const linkedPayments = (linkedPaymentsByBill[tx.id] || []).filter(payment => payment.personIndex === idx || payment.personName === p.name);
+                                        const linkedAmount = linkedPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+                                        const unpaidAmount = Math.max((parseFloat(p.amount) || 0) - linkedAmount, 0);
+                                        return (
+                                            <div key={`utility-summary-${idx}`} className="bg-slate-50 rounded-2xl p-4">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div>
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Bill Split</p>
+                                                        <p className="text-sm font-black text-slate-900">{p.name}</p>
+                                                    </div>
+                                                    <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${p.paid || unpaidAmount <= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                                                        {p.paid || unpaidAmount <= 0 ? 'Paid Off' : 'Unpaid'}
+                                                    </div>
+                                                </div>
+                                                <div className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between">
+                                                    <span>Share</span><span>${(parseFloat(p.amount) || 0).toFixed(2)}</span>
+                                                </div>
+                                                <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between">
+                                                    <span>Linked Income</span><span className="text-emerald-600">${linkedAmount.toFixed(2)}</span>
+                                                </div>
+                                                <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between">
+                                                    <span>Outstanding</span><span className={unpaidAmount > 0 ? 'text-rose-500' : 'text-emerald-600'}>${unpaidAmount.toFixed(2)}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                             {tx.receiptData && (
                                 <button onClick={() => setViewReceipt(tx.receiptData)} className="mt-6 flex items-center gap-2 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:underline"><ImageIcon size={14}/> View AI Scan</button>
                             )}
@@ -212,6 +307,20 @@
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
                                         {inc.date} • Funded to <span className="text-indigo-600">{inc.category}</span>
                                     </p>
+                                    {inc.payer && (
+                                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mt-2">
+                                            Payer: <span className="text-slate-500">{inc.payer}</span>
+                                        </p>
+                                    )}
+                                    {inc.linkedBills?.length > 0 && (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {inc.linkedBills.map((link, idx) => (
+                                                <span key={`${inc.id}-link-${idx}`} className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest">
+                                                    {link.personName}: {link.billDescription} · ${parseFloat(link.amount || 0).toFixed(2)}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex items-center justify-between sm:justify-end gap-10">
@@ -224,14 +333,16 @@
             );
         }
 
-        function AddEntryModal({ onClose, onSave }) {
+        function AddEntryModal({ onClose, onSave, transactions, incomeLogs }) {
             const [formData, setFormData] = useState({
                 type: 'expense', amount: '', category: 'Food', description: '', 
                 date: new Date().toISOString().split('T')[0],
-                receiptData: null, isSplit: false, 
+                receiptData: null, isSplit: false, payer: '', linkedBills: [],
                 splitData: [{ name: 'Person 1', amount: '', paid: false }, { name: 'Person 2', amount: '', paid: false }]
             });
             const [scanning, setScanning] = useState(false);
+
+            const utilityBills = useMemo(() => transactions.filter(tx => tx.category === 'Utilities').sort((a,b) => new Date(b.date) - new Date(a.date)), [transactions]);
 
             const calculateRemaining = () => {
                 const total = parseFloat(formData.amount) || 0;
@@ -240,29 +351,38 @@
             };
 
             const handleScan = async (file, mode) => {
+                if (!file) return;
                 setScanning(true);
                 try {
                     const base64 = await resizeImage(file);
-                    const res = await callGeminiWithRetry({
-                        contents: [{
-                            parts: [
-                                { text: `Extract data from this ${mode} receipt. Return ONLY JSON: { "total": number, "vendor": string, "date": "YYYY-MM-DD", "isUtility": boolean }.` },
-                                { inlineData: { mimeType: "image/jpeg", data: base64.split(',')[1] } }
-                            ]
-                        }],
-                        generationConfig: { responseMimeType: "application/json" }
-                    });
-                    const content = JSON.parse(res.candidates[0].content.parts[0].text);
-                    const half = (content.total / 2).toFixed(2);
+                    let content;
+                    try {
+                        const res = await callGeminiWithRetry({
+                            contents: [{
+                                parts: [
+                                    { text: `Extract data from this ${mode} receipt. Return ONLY JSON: { "total": number, "vendor": string, "date": "YYYY-MM-DD", "isUtility": boolean }.` },
+                                    { inlineData: { mimeType: "image/jpeg", data: base64.split(',')[1] } }
+                                ]
+                            }],
+                            generationConfig: { responseMimeType: "application/json" }
+                        });
+                        content = JSON.parse(res.candidates[0].content.parts[0].text);
+                    } catch (geminiError) {
+                        console.warn('Gemini scan unavailable, falling back to local OCR.', geminiError);
+                        content = await runLocalReceiptScan(file, mode);
+                    }
+                    const total = parseFloat(content.total) || 0;
+                    const splitSeed = total > 0 ? (total / 2).toFixed(2) : '';
                     setFormData(prev => ({
-                        ...prev, type: 'expense', amount: content.total || '', description: content.vendor || '', 
-                        date: content.date || prev.date, receiptData: base64, 
+                        ...prev, type: 'expense', amount: total || '', description: content.vendor || '', 
+                        date: normalizeDate(content.date || prev.date), receiptData: base64, 
                         category: (content.isUtility || mode === 'utility') ? 'Utilities' : 'Food',
                         isSplit: content.isUtility || mode === 'utility',
-                        splitData: [{ name: 'Person 1', amount: half, paid: false }, { name: 'Person 2', amount: half, paid: false }]
+                        splitData: [{ name: 'Person 1', amount: splitSeed, paid: false }, { name: 'Person 2', amount: splitSeed, paid: false }]
                     }));
                 } catch (e) {
                     console.error("Scan failed", e);
+                    alert('Receipt scan could not read this file. You can still enter the bill manually.');
                 } finally { setScanning(false); }
             };
 
@@ -301,6 +421,61 @@
                                     <option value="Food">Grocery Fund</option>
                                     <option value="Utilities">Utility Fund</option>
                                 </select>
+                                {formData.type === 'income' && (
+                                    <div className="bg-slate-50 p-5 rounded-2xl space-y-4">
+                                        <input type="text" value={formData.payer} onChange={e => setFormData({...formData, payer: e.target.value})} className="w-full bg-white p-4 rounded-xl border-none font-bold text-sm" placeholder="Person paying this income" />
+                                        {formData.category === 'Utilities' && (
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Apply utility income to unpaid bill splits</p>
+                                                    <p className="text-[10px] font-bold text-slate-400 mt-1">Tick the bills this payment clears for the selected person.</p>
+                                                </div>
+                                                <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                                                    {utilityBills.filter(bill => bill.isSplit && bill.splitData?.length).map(bill => {
+                                                        const matchingShares = bill.splitData
+                                                            .map((split, splitIndex) => {
+                                                                const linkedAmount = getLinkedAmountForShare(incomeLogs, bill.id, splitIndex);
+                                                                const shareAmount = parseFloat(split.amount) || 0;
+                                                                return { split, splitIndex, unpaidAmount: Math.max(shareAmount - linkedAmount, 0) };
+                                                            })
+                                                            .filter(({ split, unpaidAmount }) => unpaidAmount > 0 && (!formData.payer || split.name.toLowerCase().includes(formData.payer.toLowerCase()) || formData.payer.toLowerCase().includes(split.name.toLowerCase())));
+                                                        if (matchingShares.length === 0) return null;
+                                                        return (
+                                                            <div key={bill.id} className="bg-white rounded-2xl p-4 border border-slate-100">
+                                                                <div className="flex items-start justify-between gap-3 mb-3">
+                                                                    <div>
+                                                                        <p className="text-sm font-black text-slate-900">{bill.description}</p>
+                                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">{bill.date}</p>
+                                                                    </div>
+                                                                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Utility Bill</span>
+                                                                </div>
+                                                                <div className="space-y-2">
+                                                                    {matchingShares.map(({ split, splitIndex, unpaidAmount }) => {
+                                                                        const checked = formData.linkedBills.some(link => link.billId === bill.id && link.personIndex === splitIndex);
+                                                                        return (
+                                                                            <label key={`${bill.id}-${splitIndex}`} className="flex items-center justify-between gap-3 text-xs font-bold text-slate-600">
+                                                                                <span className="flex items-center gap-3">
+                                                                                    <input type="checkbox" checked={checked} onChange={e => {
+                                                                                        const linkedBills = e.target.checked
+                                                                                            ? [...formData.linkedBills, { billId: bill.id, billDescription: bill.description, personIndex: splitIndex, personName: split.name, amount: unpaidAmount }]
+                                                                                            : formData.linkedBills.filter(link => !(link.billId === bill.id && link.personIndex === splitIndex));
+                                                                                        setFormData({...formData, linkedBills});
+                                                                                    }} className="w-4 h-4" />
+                                                                                    <span>{split.name}</span>
+                                                                                </span>
+                                                                                <span className="text-rose-500">Unpaid: ${unpaidAmount.toFixed(2)}</span>
+                                                                            </label>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             {formData.type === 'expense' && (
@@ -358,6 +533,7 @@
                 end: new Date().toISOString().split('T')[0]
             });
             const [options, setOptions] = useState({ food: true, utilities: true, income: true });
+            const [groupBy, setGroupBy] = useState('company');
 
             const generateReport = () => {
                 const start = new Date(dateRange.start);
@@ -371,6 +547,24 @@
                 const filteredInc = options.income 
                     ? incomeLogs.filter(i => { const d = new Date(i.date); return d >= start && d <= end; })
                     : [];
+
+                const groupedExpenses = filteredTx.reduce((acc, tx) => {
+                    const key = groupBy === 'company' ? (tx.description || 'Unknown Company') : tx.category;
+                    acc[key] = acc[key] || { total: 0, items: [] };
+                    acc[key].total += parseFloat(tx.amount) || 0;
+                    acc[key].items.push(tx);
+                    return acc;
+                }, {});
+
+                const utilityBillStatus = filteredTx.filter(tx => tx.category === 'Utilities' && tx.isSplit && tx.splitData).map(tx => ({
+                    ...tx,
+                    shares: tx.splitData.map((share, index) => {
+                        const linkedAmount = getLinkedAmountForShare(filteredInc, tx.id, index);
+                        const shareAmount = parseFloat(share.amount) || 0;
+                        const outstanding = Math.max(shareAmount - linkedAmount, 0);
+                        return { ...share, shareAmount, linkedAmount, outstanding };
+                    })
+                }));
 
                 const printWindow = window.open('', '_blank');
                 if (!printWindow) return;
@@ -392,6 +586,7 @@
                                 <div>
                                     <h1 class="text-5xl font-black uppercase tracking-tighter mb-2">Audit Report</h1>
                                     <p class="text-slate-400 font-bold uppercase tracking-widest text-xs">${dateRange.start} to ${dateRange.end}</p>
+                                    <p class="text-slate-300 font-bold uppercase tracking-widest text-[10px] mt-2">Grouped by ${groupBy === 'company' ? 'company / shop' : 'fund category'}</p>
                                 </div>
                                 <div class="text-right">
                                     <p class="font-black text-indigo-600 uppercase tracking-widest text-sm">HouseBank Premium AI</p>
@@ -417,6 +612,17 @@
                                             <tbody class="text-sm font-bold">${filteredTx.map(t => `<tr class="border-b border-slate-50"><td class="py-4">${t.date}</td><td class="py-4">${t.description}</td><td class="py-4">${t.category}</td><td class="py-4 text-right">-$${parseFloat(t.amount).toFixed(2)}</td></tr>`).join('')}</tbody>
                                         </table>
                                     </section>
+                                    <section>
+                                        <h2 class="text-xs font-black uppercase tracking-[0.3em] text-slate-700 mb-6 pb-2 border-b-2 border-slate-100">Report by ${groupBy === 'company' ? 'Company / Shop' : 'Category'}</h2>
+                                        <table class="w-full text-left">
+                                            <thead><tr class="text-[10px] font-black uppercase tracking-widest text-slate-400"><th class="pb-4">Group</th><th class="pb-4">Records</th><th class="pb-4 text-right">Total</th></tr></thead>
+                                            <tbody class="text-sm font-bold">${Object.entries(groupedExpenses).map(([group, data]) => `<tr class="border-b border-slate-50"><td class="py-4">${group}</td><td class="py-4">${data.items.length}</td><td class="py-4 text-right">-$${data.total.toFixed(2)}</td></tr>`).join('')}</tbody>
+                                        </table>
+                                    </section>
+                                    ${utilityBillStatus.length > 0 ? `<section>
+                                        <h2 class="text-xs font-black uppercase tracking-[0.3em] text-blue-600 mb-6 pb-2 border-b-2 border-blue-50">Utility Bill Split Status</h2>
+                                        <div class="space-y-6">${utilityBillStatus.map(bill => `<div class="border border-slate-100 rounded-3xl p-6"><div class="flex justify-between items-start gap-4 mb-4"><div><h3 class="text-lg font-black">${bill.description}</h3><p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">${bill.date}</p></div><div class="text-right"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Bill Total</p><p class="text-lg font-black">$${parseFloat(bill.amount).toFixed(2)}</p></div></div><table class="w-full text-left"><thead><tr class="text-[10px] font-black uppercase tracking-widest text-slate-400"><th class="pb-3">Person</th><th class="pb-3 text-right">Share</th><th class="pb-3 text-right">Income Linked</th><th class="pb-3 text-right">Outstanding</th><th class="pb-3 text-right">Status</th></tr></thead><tbody>${bill.shares.map(share => `<tr class="border-t border-slate-50"><td class="py-3">${share.name}</td><td class="py-3 text-right">$${share.shareAmount.toFixed(2)}</td><td class="py-3 text-right text-emerald-600">$${share.linkedAmount.toFixed(2)}</td><td class="py-3 text-right ${share.outstanding > 0 ? 'text-rose-600' : 'text-emerald-600'}">$${share.outstanding.toFixed(2)}</td><td class="py-3 text-right">${share.paid || share.outstanding <= 0 ? 'Paid Off' : 'Unpaid'}</td></tr>`).join('')}</tbody></table></div>`).join('')}</div>
+                                    </section>` : ''}
                                 ` : ''}
                             </div>
 
@@ -453,6 +659,14 @@
                             <div className="space-y-2">
                                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">To Date</label>
                                 <input type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl border-none font-bold outline-none focus:ring-2 ring-indigo-500/10" />
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Group Expense Reporting</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <button onClick={() => setGroupBy('company')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border-2 ${groupBy === 'company' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Company / Shop</button>
+                                <button onClick={() => setGroupBy('category')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border-2 ${groupBy === 'category' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Fund Category</button>
                             </div>
                         </div>
 
@@ -533,6 +747,20 @@
                 const coll = data.type === 'income' ? 'income_logs' : 'transactions';
                 const ref = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection(coll);
                 await ref.add({ ...data, createdAt: new Date().toISOString(), creatorId: user.uid });
+                if (data.type === 'income' && data.category === 'Utilities' && data.linkedBills?.length) {
+                    for (const link of data.linkedBills) {
+                        const tx = transactions.find(item => item.id === link.billId);
+                        if (!tx?.splitData?.[link.personIndex]) continue;
+                        const updatedSplit = [...tx.splitData];
+                        const existingLinkedAmount = getLinkedAmountForShare(incomeLogs, link.billId, link.personIndex);
+                        const shareAmount = parseFloat(updatedSplit[link.personIndex].amount) || 0;
+                        updatedSplit[link.personIndex] = {
+                            ...updatedSplit[link.personIndex],
+                            paid: existingLinkedAmount + (parseFloat(link.amount) || 0) >= shareAmount
+                        };
+                        await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('transactions').doc(link.billId).update({ splitData: updatedSplit });
+                    }
+                }
                 setIsAddModalOpen(false);
             };
 
@@ -600,8 +828,8 @@
                             ) : (
                                 <>
                                     {currentView === 'dashboard' && <DashboardOverview stats={categoryStats} />}
-                                    {currentView === 'groceries' && <TransactionList type="Food" transactions={transactions} onDelete={deleteRecord} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
-                                    {currentView === 'utilities' && <TransactionList type="Utilities" transactions={transactions} onDelete={deleteRecord} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
+                                    {currentView === 'groceries' && <TransactionList type="Food" transactions={transactions} incomeLogs={incomeLogs} onDelete={deleteRecord} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
+                                    {currentView === 'utilities' && <TransactionList type="Utilities" transactions={transactions} incomeLogs={incomeLogs} onDelete={deleteRecord} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
                                     {currentView === 'income' && <IncomeListView incomeLogs={incomeLogs} onDelete={deleteRecord} />}
                                     {currentView === 'reports' && <ReportView transactions={transactions} incomeLogs={incomeLogs} />}
                                 </>
@@ -609,7 +837,7 @@
                         </main>
                     </div>
 
-                    {isAddModalOpen && <AddEntryModal onClose={() => setIsAddModalOpen(false)} onSave={saveRecord} />}
+                    {isAddModalOpen && <AddEntryModal onClose={() => setIsAddModalOpen(false)} onSave={saveRecord} transactions={transactions} incomeLogs={incomeLogs} />}
                     {receiptToView && (
                         <div className="fixed inset-0 bg-slate-900/98 z-[100] flex items-center justify-center p-8 backdrop-blur-md" onClick={() => setReceiptToView(null)}>
                             <img src={receiptToView} className="max-w-full max-h-full rounded-[2rem] shadow-2xl border-4 border-white/10" alt="Receipt" />
