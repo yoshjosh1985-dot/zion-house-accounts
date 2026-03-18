@@ -124,7 +124,20 @@
             const total = totalMatches.length > 0
                 ? parseFloat(totalMatches[totalMatches.length - 1][1].replace(',', '.'))
                 : (fallbackAmountMatches.length ? Math.max(...fallbackAmountMatches) : 0);
-            const vendor = lines[0] || (mode === 'utility' ? 'Utility Bill' : 'Receipt Scan');
+            const skipVendorPatterns = [
+                /^(tax invoice|receipt|invoice|customer copy|merchant copy)$/i,
+                /^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}$/,
+                /^\(?\+?\d[\d\s().-]{5,}$/,
+                /^[#*.\s\d-]+$/,
+                /total|subtotal|amount due|balance due|change|cash|visa|mastercard|eftpos/i,
+                /www\.|\.com|\.net|thank you|served by/i
+            ];
+            const vendorCandidate = lines.find(line => (
+                line.length > 2 &&
+                /[a-z]/i.test(line) &&
+                !skipVendorPatterns.some(pattern => pattern.test(line))
+            ));
+            const vendor = vendorCandidate || lines[0] || (mode === 'utility' ? 'Utility Bill' : 'Receipt Scan');
             const dateMatch = cleanText.match(/(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2})/);
             const utilityKeywords = /(utility|electric|water|power|energy|gas|internet|telecom|sewer)/i;
             return {
@@ -731,13 +744,6 @@
                         </button>
                     </div>
 
-                    <div className="bg-indigo-600 p-10 rounded-[3rem] text-white flex items-center justify-between">
-                        <div className="space-y-1">
-                            <h4 className="text-2xl font-black uppercase tracking-tighter">Quick Audit</h4>
-                            <p className="text-[9px] font-black text-indigo-200 uppercase tracking-widest">Generate current month totals</p>
-                        </div>
-                        <Printer size={40} className="text-indigo-400 opacity-50" />
-                    </div>
                 </div>
             );
         }
@@ -791,10 +797,10 @@
                 if (!user) return;
                 const normalizedData = {
                     ...data,
-                    companyName: (data.companyName || data.description || '').trim(),
-                    paidInDate: data.type === 'income' ? (data.paidInDate || data.date) : undefined,
-                    dueDate: data.type === 'expense' && data.category === 'Utilities' ? (data.dueDate || data.date) : undefined
+                    companyName: (data.companyName || data.description || '').trim()
                 };
+                if (data.type === 'income') normalizedData.paidInDate = data.paidInDate || data.date;
+                if (data.type === 'expense' && data.category === 'Utilities') normalizedData.dueDate = data.dueDate || data.date;
                 const coll = data.type === 'income' ? 'income_logs' : 'transactions';
                 const ref = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection(coll);
                 await ref.add({ ...normalizedData, createdAt: new Date().toISOString(), creatorId: user.uid });
