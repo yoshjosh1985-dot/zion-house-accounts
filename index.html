@@ -96,6 +96,25 @@
             reader.readAsDataURL(file);
         });
 
+        const resizeDataUrl = (dataUrl, maxWidth = 900, quality = 0.72) => new Promise((resolve) => {
+            if (!dataUrl) {
+                resolve(null);
+                return;
+            }
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const scale = Math.min(1, maxWidth / img.width);
+                canvas.width = Math.max(1, Math.round(img.width * scale));
+                canvas.height = Math.max(1, Math.round(img.height * scale));
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.onerror = () => resolve(dataUrl);
+            img.src = dataUrl;
+        });
+
         const fileToDataUrl = (file) => new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result);
@@ -221,6 +240,12 @@
             if (name.endsWith('.pdf')) return 'application/pdf';
             if (name.endsWith('.png')) return 'image/png';
             return 'image/jpeg';
+        };
+
+        const estimateDataUrlSize = (dataUrl) => {
+            if (!dataUrl || typeof dataUrl !== 'string') return 0;
+            const base64 = dataUrl.split(',')[1] || '';
+            return Math.ceil((base64.length * 3) / 4);
         };
 
         const toCsv = (transactions, incomeLogs) => {
@@ -441,6 +466,7 @@
                     let previewImage = null;
                     try {
                         previewImage = isPdf ? await renderPdfFirstPageToImage(file) : await resizeImage(file);
+                        previewImage = await resizeDataUrl(previewImage, isPdf ? 700 : 900, isPdf ? 0.68 : 0.72);
                     } catch (previewError) {
                         console.warn('Preview generation failed, saving raw file anyway.', previewError);
                         if (!isPdf) throw previewError;
@@ -758,10 +784,16 @@
                             storagePath,
                             downloadURL
                         };
+                        normalizedData.receiptData = null;
                     } catch (uploadError) {
                         console.error('Receipt upload failed, saving ledger entry without stored file.', uploadError);
                         normalizedData.receiptFile = null;
-                        attachmentWarning = 'The ledger entry was posted, but the scanned file could not be uploaded. A preview image was kept when available.';
+                        if (estimateDataUrlSize(normalizedData.receiptData) > 250000) {
+                            normalizedData.receiptData = null;
+                            attachmentWarning = 'The ledger entry was posted, but the scanned file could not be uploaded, so the attachment preview was skipped to keep the save from failing.';
+                        } else {
+                            attachmentWarning = 'The ledger entry was posted, but the scanned file could not be uploaded. A small preview image was kept when available.';
+                        }
                     }
                 } else {
                     normalizedData.receiptFile = data.receiptFile || null;
