@@ -212,6 +212,15 @@
             a.click();
         };
 
+        const inferReceiptType = (receipt) => {
+            if (!receipt) return 'image/jpeg';
+            if (receipt.type) return receipt.type;
+            const name = (receipt.name || '').toLowerCase();
+            if (name.endsWith('.pdf')) return 'application/pdf';
+            if (name.endsWith('.png')) return 'image/png';
+            return 'image/jpeg';
+        };
+
         const toCsv = (transactions, incomeLogs) => {
             const rows = [
                 ['recordType', 'date', 'paidInDate', 'dueDate', 'category', 'description', 'companyName', 'amount', 'payer', 'isSplit', 'linkedBills'],
@@ -362,7 +371,10 @@
 
                                 {(tx.receiptData || tx.receiptFile?.data) && (
                                     <div className="mt-6 flex flex-wrap gap-3">
-                                        <button onClick={() => setViewReceipt(tx.receiptFile || { data: tx.receiptData, type: 'image/jpeg', name: `${tx.description || 'receipt'}.jpg` })} className="flex items-center gap-2 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:underline"><ImageIcon size={14}/> View Receipt</button>
+                                        <button onClick={() => {
+                                            const receipt = tx.receiptFile || { data: tx.receiptData, type: 'image/jpeg', name: `${tx.description || 'receipt'}.jpg` };
+                                            setViewReceipt({ ...receipt, type: inferReceiptType(receipt) });
+                                        }} className="flex items-center gap-2 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:underline"><ImageIcon size={14}/> View Receipt</button>
                                         {tx.receiptFile?.data && (
                                             <button onClick={() => downloadDataUrl(tx.receiptFile.data, tx.receiptFile.name || 'receipt')} className="flex items-center gap-2 text-emerald-600 text-[10px] font-black uppercase tracking-widest hover:underline"><Download size={14}/> Download Saved File</button>
                                         )}
@@ -509,6 +521,12 @@
                                     <option value="Food">Grocery Fund</option>
                                     <option value="Utilities">Utility Fund</option>
                                 </select>
+                                {formData.type === 'expense' && (
+                                    <div className="space-y-2">
+                                        <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Transaction Date</label>
+                                        <input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="w-full bg-slate-50 p-4 rounded-xl border-none font-bold text-sm" />
+                                    </div>
+                                )}
                                 {formData.type === 'expense' && formData.category === 'Utilities' && (
                                     <div className="space-y-2">
                                         <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Utility Bill Due Date</label>
@@ -589,7 +607,7 @@
                             )}
                         </div>
                         <div className="p-8 border-t border-slate-50 shrink-0">
-                            <button onClick={() => onSave(formData)} disabled={!formData.amount || !formData.description} className={`w-full py-5 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] ${(!formData.amount || !formData.description) ? 'bg-slate-200 text-slate-400' : formData.type === 'income' ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}`}>Post to Ledger</button>
+                            <button onClick={() => onSave(formData)} disabled={!formData.description || (formData.type === 'income' && !formData.amount)} className={`w-full py-5 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] ${(!formData.description || (formData.type === 'income' && !formData.amount)) ? 'bg-slate-200 text-slate-400' : formData.type === 'income' ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}`}>Post to Ledger</button>
                         </div>
                     </div>
                 </div>
@@ -848,8 +866,8 @@
                     {receiptToView && (
                         <div className="fixed inset-0 bg-slate-900/98 z-[100] flex items-center justify-center p-8 backdrop-blur-md" onClick={() => setReceiptToView(null)}>
                             <div className="max-w-full max-h-full w-full h-full flex items-center justify-center">
-                                {(receiptToView.type || '').includes('pdf')
-                                    ? <iframe title="Receipt PDF" src={receiptToView.data} className="w-full h-full rounded-[2rem] bg-white" />
+                                {inferReceiptType(receiptToView).includes('pdf')
+                                    ? <embed title="Receipt PDF" src={receiptToView.data} type="application/pdf" className="w-full h-full rounded-[2rem] bg-white" />
                                     : <img src={receiptToView.data} className="max-w-full max-h-full rounded-[2rem] shadow-2xl border-4 border-white/10" alt="Receipt" />}
                             </div>
                             <button className="absolute top-10 right-10 p-4 bg-white/10 text-white rounded-full"><X size={32}/></button>
