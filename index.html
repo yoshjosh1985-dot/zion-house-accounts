@@ -16,6 +16,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
@@ -73,6 +74,7 @@
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
+        const storage = firebase.storage();
 
         const getPdfJsLib = () => window.pdfjsLib;
 
@@ -369,14 +371,14 @@
                                     </div>
                                 )}
 
-                                {(tx.receiptData || tx.receiptFile?.data) && (
+                                {(tx.receiptData || tx.receiptFile?.data || tx.receiptFile?.downloadURL) && (
                                     <div className="mt-6 flex flex-wrap gap-3">
                                         <button onClick={() => {
                                             const receipt = tx.receiptFile || { data: tx.receiptData, type: 'image/jpeg', name: `${tx.description || 'receipt'}.jpg` };
                                             setViewReceipt({ ...receipt, type: inferReceiptType(receipt) });
                                         }} className="flex items-center gap-2 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:underline"><ImageIcon size={14}/> View Receipt</button>
-                                        {tx.receiptFile?.data && (
-                                            <button onClick={() => downloadDataUrl(tx.receiptFile.data, tx.receiptFile.name || 'receipt')} className="flex items-center gap-2 text-emerald-600 text-[10px] font-black uppercase tracking-widest hover:underline"><Download size={14}/> Download Saved File</button>
+                                        {(tx.receiptFile?.data || tx.receiptFile?.downloadURL) && (
+                                            <button onClick={() => downloadDataUrl(tx.receiptFile.downloadURL || tx.receiptFile.data, tx.receiptFile.name || 'receipt')} className="flex items-center gap-2 text-emerald-600 text-[10px] font-black uppercase tracking-widest hover:underline"><Download size={14}/> Download Saved File</button>
                                         )}
                                     </div>
                                 )}
@@ -726,9 +728,23 @@
                 const normalizedData = {
                     ...data,
                     companyName: (data.companyName || data.description || '').trim(),
-                    receiptFile: data.receiptFile || null,
                     receiptData: data.receiptData || null
                 };
+                if (data.receiptFile?.data) {
+                    const safeName = `${Date.now()}-${(data.receiptFile.name || 'receipt').replace(/[^a-z0-9._-]+/gi, '_')}`;
+                    const storagePath = `artifacts/${APP_ID}/receipts/${user.uid}/${safeName}`;
+                    const receiptRef = storage.ref().child(storagePath);
+                    await receiptRef.putString(data.receiptFile.data, 'data_url');
+                    const downloadURL = await receiptRef.getDownloadURL();
+                    normalizedData.receiptFile = {
+                        name: data.receiptFile.name || safeName,
+                        type: data.receiptFile.type || inferReceiptType(data.receiptFile),
+                        storagePath,
+                        downloadURL
+                    };
+                } else {
+                    normalizedData.receiptFile = data.receiptFile || null;
+                }
                 if (data.type === 'income') normalizedData.paidInDate = data.paidInDate || data.date;
                 if (data.type === 'expense' && data.category === 'Utilities') normalizedData.dueDate = data.dueDate || data.date;
                 const coll = data.type === 'income' ? 'income_logs' : 'transactions';
@@ -796,16 +812,22 @@
                 }
                 const zip = new zipLib();
                 const allFiles = transactions
-                    .filter(tx => tx.receiptFile?.data)
+                    .filter(tx => tx.receiptFile?.downloadURL || tx.receiptFile?.data)
                     .map((tx, index) => ({ ...tx.receiptFile, safeName: `${String(index + 1).padStart(3, '0')}-${(tx.description || tx.companyName || 'receipt').replace(/[^a-z0-9-_]+/gi, '_')}-${tx.receiptFile.name || 'file'}` }));
                 if (allFiles.length === 0) {
                     alert('No saved receipt or PDF files are available to download yet.');
                     return;
                 }
-                allFiles.forEach(file => {
-                    const base64 = file.data.split(',')[1];
-                    zip.file(file.safeName, base64, { base64: true });
-                });
+                for (const file of allFiles) {
+                    if (file.downloadURL) {
+                        const response = await fetch(file.downloadURL);
+                        const blob = await response.blob();
+                        zip.file(file.safeName, blob);
+                    } else if (file.data) {
+                        const base64 = file.data.split(',')[1];
+                        zip.file(file.safeName, base64, { base64: true });
+                    }
+                }
                 const content = await zip.generateAsync({ type: 'blob' });
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(content);
