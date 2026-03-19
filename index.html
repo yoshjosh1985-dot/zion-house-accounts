@@ -4,19 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HouseBank Premium AI | Ledger</title>
-    
-    <!-- Tailwind CSS -->
+
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- React & ReactDOM (Core Dependencies) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    
-    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.js"></script>
 
-    <!-- Firebase SDKs (Compat version for simplicity) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -33,15 +28,13 @@
     <div id="root" class="h-full"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef } = React;
+        const { useState, useEffect, useMemo } = React;
 
-        // --- INLINE ICONS (Ensures no library dependency issues) ---
         const Icon = ({ path, size = 24, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
                 {path}
             </svg>
         );
-
         const LayoutDashboard = (props) => <Icon {...props} path={<><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></>} />;
         const Wallet = (props) => <Icon {...props} path={<><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></>} />;
         const Plus = (props) => <Icon {...props} path={<><path d="M5 12h14"/><path d="M12 5v14"/></>} />;
@@ -54,13 +47,16 @@
         const Loader2 = (props) => <Icon {...props} path={<path d="M21 12a9 9 0 1 1-6.219-8.56"/>} className={`${props.className} animate-spin`} />;
         const ShoppingCart = (props) => <Icon {...props} path={<><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></>} />;
         const Zap = (props) => <Icon {...props} path={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>} />;
-        const Calendar = (props) => <Icon {...props} path={<><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></>} />;
-        const Building2 = (props) => <Icon {...props} path={<><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></>} />;
         const ArrowUpCircle = (props) => <Icon {...props} path={<><circle cx="12" cy="12" r="10"/><polyline points="16 12 12 8 8 12"/><line x1="12" x2="12" y1="16" y2="8"/></>} />;
+        const Download = (props) => <Icon {...props} path={<><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></>} />;
+        const ChevronDown = (props) => <Icon {...props} path={<polyline points="6 9 12 15 18 9"/>} />;
+        const ChevronUp = (props) => <Icon {...props} path={<polyline points="18 15 12 9 6 15"/>} />;
+        const AlertTriangle = (props) => <Icon {...props} path={<><path d="m10.29 3.86-7.5 13A2 2 0 0 0 4.5 20h15a2 2 0 0 0 1.71-3.14l-7.5-13a2 2 0 0 0-3.42 0Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></>} />;
+        const Database = (props) => <Icon {...props} path={<><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></>} />;
+        const FileText = (props) => <Icon {...props} path={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></>} />;
 
-        // --- FIREBASE CONFIG ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
-            ? JSON.parse(__firebase_config) 
+        const firebaseConfig = typeof __firebase_config !== 'undefined'
+            ? JSON.parse(__firebase_config)
             : {
                 apiKey: "AIzaSyA53SpP4BQ3kU325m8PL3-7rY7iUTfp45s",
                 authDomain: "home-accounting-2463d.firebaseapp.com",
@@ -70,35 +66,39 @@
                 appId: "1:645556460544:web:f7d822278af64654918ce5"
             };
 
-        const apiKey = typeof __gemini_api_key !== 'undefined' ? __gemini_api_key : ""; // API Key for Gemini
+        const apiKey = typeof __gemini_api_key !== 'undefined' ? __gemini_api_key : "";
         const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'home-accounting-v1';
 
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
 
-        // --- UTILITIES ---
-        const resizeImage = (file, maxWidth = 800) => {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const ctx = canvas.getContext('2d');
-                        const scale = Math.min(1, maxWidth / img.width);
-                        canvas.width = img.width * scale;
-                        canvas.height = img.height * scale;
-                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                        resolve(canvas.toDataURL('image/jpeg', 0.6));
-                    };
-                    img.src = e.target.result;
+        const getPdfJsLib = () => window.pdfjsLib;
+
+        const resizeImage = (file, maxWidth = 1200) => new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const scale = Math.min(1, maxWidth / img.width);
+                    canvas.width = img.width * scale;
+                    canvas.height = img.height * scale;
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.8));
                 };
-                reader.readAsDataURL(file);
-            });
-        };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
 
         const normalizeDate = (value) => {
             if (!value) return new Date().toISOString().split('T')[0];
@@ -117,7 +117,7 @@
         const extractReceiptDetailsFromText = (text, mode) => {
             const cleanText = text.replace(/\r/g, '');
             const lines = cleanText.split('\n').map(line => line.trim()).filter(Boolean);
-            const totalMatches = [...cleanText.matchAll(/(?:total|amount due|balance due|grand total|net amount|due)\D{0,15}(\d+[\.,]\d{2})/gi)];
+            const totalMatches = [...cleanText.matchAll(/(?:total|amount due|balance due|grand total|net amount|due)\D{0,20}(\d+[\.,]\d{2})/gi)];
             const fallbackAmountMatches = [...cleanText.matchAll(/\b(\d+[\.,]\d{2})\b/g)]
                 .map(match => parseFloat(match[1].replace(',', '.')))
                 .filter(value => value > 1);
@@ -125,41 +125,45 @@
                 ? parseFloat(totalMatches[totalMatches.length - 1][1].replace(',', '.'))
                 : (fallbackAmountMatches.length ? Math.max(...fallbackAmountMatches) : 0);
             const skipVendorPatterns = [
-                /^(tax invoice|receipt|invoice|customer copy|merchant copy)$/i,
+                /^(tax invoice|receipt|invoice|customer copy|merchant copy|bill to|statement)$/i,
                 /^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}$/,
                 /^\(?\+?\d[\d\s().-]{5,}$/,
                 /^[#*.\s\d-]+$/,
-                /total|subtotal|amount due|balance due|change|cash|visa|mastercard|eftpos/i,
-                /www\.|\.com|\.net|thank you|served by/i
+                /total|subtotal|amount due|balance due|change|cash|visa|mastercard|eftpos|gst|abn/i,
+                /www\.|\.com|\.net|thank you|served by|page \d/i
             ];
-            const vendorCandidate = lines.find(line => (
-                line.length > 2 &&
-                /[a-z]/i.test(line) &&
-                !skipVendorPatterns.some(pattern => pattern.test(line))
-            ));
-            const vendor = vendorCandidate || lines[0] || (mode === 'utility' ? 'Utility Bill' : 'Receipt Scan');
+            const vendorCandidate = lines.find(line => line.length > 2 && /[a-z]/i.test(line) && !skipVendorPatterns.some(pattern => pattern.test(line)));
             const dateMatch = cleanText.match(/(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2})/);
             const utilityKeywords = /(utility|electric|water|power|energy|gas|internet|telecom|sewer)/i;
             return {
                 total: total || '',
-                vendor,
+                vendor: vendorCandidate || lines[0] || (mode === 'utility' ? 'Utility Bill' : 'Receipt Scan'),
                 date: normalizeDate(dateMatch ? dateMatch[1] : ''),
                 isUtility: mode === 'utility' || utilityKeywords.test(cleanText)
             };
         };
 
-        const runLocalReceiptScan = async (file, mode) => {
-            if (!window.Tesseract) throw new Error('Tesseract OCR library unavailable');
-            const { data } = await window.Tesseract.recognize(file, 'eng');
-            return extractReceiptDetailsFromText(data.text || '', mode);
+        const renderPdfFirstPageToImage = async (file) => {
+            const pdfjsLib = getPdfJsLib();
+            if (!pdfjsLib) throw new Error('PDF.js not available');
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.js';
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const page = await pdf.getPage(1);
+            const viewport = page.getViewport({ scale: 1.5 });
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            await page.render({ canvasContext: context, viewport }).promise;
+            return canvas.toDataURL('image/jpeg', 0.9);
         };
 
-        const getLinkedAmountForShare = (incomeLogs, billId, personIndex) => {
-            return incomeLogs.reduce((sum, income) => (
-                sum + (income.linkedBills || [])
-                    .filter(link => link.billId === billId && link.personIndex === personIndex)
-                    .reduce((subtotal, link) => subtotal + (parseFloat(link.amount) || 0), 0)
-            ), 0);
+        const runLocalReceiptScan = async (scanSource, mode) => {
+            if (!window.Tesseract) throw new Error('Tesseract OCR library unavailable');
+            const source = typeof scanSource === 'string' ? scanSource : scanSource.file || scanSource;
+            const { data } = await window.Tesseract.recognize(source, 'eng');
+            return extractReceiptDetailsFromText(data.text || '', mode);
         };
 
         const callGeminiWithRetry = async (payload, retries = 5) => {
@@ -175,7 +179,7 @@
                     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                     const result = await response.json();
                     if (result.candidates && result.candidates[0]) return result;
-                    throw new Error("Empty response");
+                    throw new Error('Empty response');
                 } catch (err) {
                     if (i === retries - 1) throw err;
                     await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
@@ -183,123 +187,178 @@
             }
         };
 
-        // --- COMPONENTS ---
-        function DashboardOverview({ stats }) {
+        const getLinkedAmountForShare = (incomeLogs, billId, personIndex) => incomeLogs.reduce((sum, income) => (
+            sum + (income.linkedBills || [])
+                .filter(link => link.billId === billId && link.personIndex === personIndex)
+                .reduce((subtotal, link) => subtotal + (parseFloat(link.amount) || 0), 0)
+        ), 0);
+
+        const downloadDataUrl = (dataUrl, filename) => {
+            const a = document.createElement('a');
+            a.href = dataUrl;
+            a.download = filename;
+            a.click();
+        };
+
+        const toCsv = (transactions, incomeLogs) => {
+            const rows = [
+                ['recordType', 'date', 'paidInDate', 'dueDate', 'category', 'description', 'companyName', 'amount', 'payer', 'isSplit', 'linkedBills'],
+                ...transactions.map(tx => [
+                    'expense', tx.date || '', '', tx.dueDate || '', tx.category || '', tx.description || '', tx.companyName || '', tx.amount || '', '', tx.isSplit ? 'yes' : 'no', JSON.stringify(tx.splitData || [])
+                ]),
+                ...incomeLogs.map(inc => [
+                    'income', inc.date || '', inc.paidInDate || '', '', inc.category || '', inc.description || '', inc.companyName || '', inc.amount || '', inc.payer || '', '', JSON.stringify(inc.linkedBills || [])
+                ])
+            ];
+            return rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
+        };
+
+        function DashboardOverview({ stats, outstandingBills }) {
             return (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
-                    {['Food', 'Utilities'].map(key => {
-                        const catStats = stats[key] || { income: 0, spent: 0 };
-                        const balance = catStats.income - catStats.spent;
-                        return (
-                            <div key={key} className="bg-white p-8 md:p-10 rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
-                                <div className="flex justify-between items-start mb-10">
-                                    <div className={`p-4 rounded-2xl ${key === 'Food' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
-                                        {key === 'Food' ? <ShoppingCart size={28}/> : <Zap size={28}/>}
+                <div className="space-y-10">
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+                        {['Food', 'Utilities'].map(key => {
+                            const catStats = stats[key] || { income: 0, spent: 0 };
+                            const balance = catStats.income - catStats.spent;
+                            return (
+                                <div key={key} className="bg-white p-8 md:p-10 rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
+                                    <div className="flex justify-between items-start mb-10">
+                                        <div className={`p-4 rounded-2xl ${key === 'Food' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
+                                            {key === 'Food' ? <ShoppingCart size={28}/> : <Zap size={28}/>} 
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Account Balance</p>
+                                            <p className={`text-4xl md:text-5xl font-black tracking-tighter ${balance < 0 ? 'text-rose-500' : 'text-slate-900'}`}>${balance.toFixed(2)}</p>
+                                        </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Account Balance</p>
-                                        <p className={`text-4xl md:text-5xl font-black tracking-tighter ${balance < 0 ? 'text-rose-500' : 'text-slate-900'}`}>
-                                            ${balance.toFixed(2)}
-                                        </p>
+                                    <div className="grid grid-cols-2 gap-6 pt-10 border-t border-slate-50">
+                                        <div className="text-center">
+                                            <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mb-1">Funded</p>
+                                            <p className="text-lg font-black text-slate-900">${catStats.income.toFixed(2)}</p>
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mb-1">Spent</p>
+                                            <p className="text-lg font-black text-rose-500">${catStats.spent.toFixed(2)}</p>
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-6 pt-10 border-t border-slate-50">
-                                    <div className="text-center">
-                                        <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mb-1">Funded</p>
-                                        <p className="text-lg font-black text-slate-900">${catStats.income.toFixed(2)}</p>
-                                    </div>
-                                    <div className="text-center">
-                                        <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mb-1">Spent</p>
-                                        <p className="text-lg font-black text-rose-500">${catStats.spent.toFixed(2)}</p>
-                                    </div>
-                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div className="bg-white p-8 rounded-[2.5rem] border border-rose-100 shadow-sm">
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="p-3 rounded-2xl bg-rose-100 text-rose-600"><AlertTriangle size={22} /></div>
+                            <div>
+                                <h3 className="text-xl font-black uppercase tracking-tighter text-rose-600">Outstanding Bill Alert</h3>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Simple red flag preview for unpaid utility shares</p>
                             </div>
-                        );
-                    })}
+                        </div>
+                        {outstandingBills.length === 0 ? (
+                            <p className="text-sm font-bold text-slate-400">No outstanding utility shares right now.</p>
+                        ) : (
+                            <div className="space-y-3">
+                                {outstandingBills.slice(0, 5).map((item, idx) => (
+                                    <div key={`${item.billId}-${item.personIndex}-${idx}`} className="bg-rose-50 border border-rose-100 rounded-2xl p-4 flex items-center justify-between gap-4">
+                                        <div>
+                                            <p className="text-sm font-black text-rose-700">{item.personName} still owes on {item.billDescription}</p>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-rose-400 mt-1">{item.billDate}{item.dueDate ? ` • Due ${item.dueDate}` : ''}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-rose-400">Outstanding</p>
+                                            <p className="text-lg font-black text-rose-600">${item.outstanding.toFixed(2)}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             );
         }
 
         function TransactionList({ type, transactions, onDelete, setViewReceipt, onTogglePaid, incomeLogs = [] }) {
+            const [openSplits, setOpenSplits] = useState({});
             const filtered = transactions.filter(t => t.category === type).sort((a,b) => new Date(b.date) - new Date(a.date));
-            const linkedPaymentsByBill = incomeLogs.reduce((acc, income) => {
-                (income.linkedBills || []).forEach(link => {
-                    acc[link.billId] = acc[link.billId] || [];
-                    acc[link.billId].push({
-                        payer: income.payer || income.description,
-                        personName: link.personName,
-                        personIndex: link.personIndex,
-                        amount: parseFloat(link.amount || 0),
-                        date: income.date
-                    });
-                });
-                return acc;
-            }, {});
-            if(filtered.length === 0) return <div className="text-center mt-20 text-slate-300 font-bold uppercase text-xs">No records found.</div>;
+            if (filtered.length === 0) return <div className="text-center mt-20 text-slate-300 font-bold uppercase text-xs">No records found.</div>;
+
             return (
                 <div className="space-y-6">
-                    {filtered.map(tx => (
-                        <div key={tx.id} className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm group">
-                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                                <div className="flex gap-4 md:gap-6 items-center">
-                                   <div className="p-4 bg-slate-50 rounded-2xl text-slate-200 group-hover:text-indigo-400 transition-colors shrink-0">
-                                    <ImageIcon size={24}/>
-                                   </div>
-                                   <div>
-                                     <h4 className="font-black text-slate-800 text-lg md:text-xl uppercase tracking-tight">{tx.description}</h4>
-                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{tx.date}{tx.category === 'Utilities' && tx.dueDate ? ` • Due ${tx.dueDate}` : ''}</p>
-                                   </div>
+                    {filtered.map(tx => {
+                        const isOpen = !!openSplits[tx.id];
+                        return (
+                            <div key={tx.id} className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm group">
+                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                                    <div className="flex gap-4 md:gap-6 items-center">
+                                        <div className="p-4 bg-slate-50 rounded-2xl text-slate-200 group-hover:text-indigo-400 transition-colors shrink-0"><ImageIcon size={24}/></div>
+                                        <div>
+                                            <h4 className="font-black text-slate-800 text-lg md:text-xl uppercase tracking-tight">{tx.description}</h4>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{tx.date}{tx.category === 'Utilities' && tx.dueDate ? ` • Due ${tx.dueDate}` : ''}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between sm:justify-end gap-6">
+                                        <span className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">-${parseFloat(tx.amount || 0).toFixed(2)}</span>
+                                        <button onClick={() => onDelete(tx.id, 'expense')} className="p-2 text-slate-200 hover:text-rose-500 rounded-xl transition-colors"><Trash2 size={24}/></button>
+                                    </div>
                                 </div>
-                                <div className="flex items-center justify-between sm:justify-end gap-10">
-                                    <span className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">-${parseFloat(tx.amount).toFixed(2)}</span>
-                                    <button onClick={() => onDelete(tx.id, 'expense')} className="p-2 text-slate-200 hover:text-rose-500 rounded-xl transition-colors"><Trash2 size={24}/></button>
-                                </div>
-                            </div>
-                            {tx.isSplit && tx.splitData && (
-                                <div className="mt-6 md:mt-8 pt-6 md:pt-8 border-t border-slate-50 flex flex-wrap gap-3">
-                                    {tx.splitData.map((p, idx) => (
-                                        <button key={idx} onClick={() => onTogglePaid(tx.id, idx)} className={`flex items-center gap-2 px-4 md:px-5 py-2 md:py-2.5 rounded-xl border text-[9px] md:text-[10px] font-black transition-all ${p.paid ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-100' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
-                                            {p.paid ? <CheckCircle size={14}/> : <Circle size={14}/>} {p.name.toUpperCase()}: ${parseFloat(p.amount).toFixed(2)}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                            {tx.category === 'Utilities' && tx.isSplit && tx.splitData && (
-                                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {tx.splitData.map((p, idx) => {
-                                        const linkedPayments = (linkedPaymentsByBill[tx.id] || []).filter(payment => payment.personIndex === idx || payment.personName === p.name);
-                                        const linkedAmount = linkedPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
-                                        const unpaidAmount = Math.max((parseFloat(p.amount) || 0) - linkedAmount, 0);
-                                        return (
-                                            <div key={`utility-summary-${idx}`} className="bg-slate-50 rounded-2xl p-4">
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <div>
-                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Bill Split</p>
-                                                        <p className="text-sm font-black text-slate-900">{p.name}</p>
-                                                    </div>
-                                                    <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${p.paid || unpaidAmount <= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
-                                                        {p.paid || unpaidAmount <= 0 ? 'Paid Off' : 'Unpaid'}
-                                                    </div>
-                                                </div>
-                                                <div className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between">
-                                                    <span>Share</span><span>${(parseFloat(p.amount) || 0).toFixed(2)}</span>
-                                                </div>
-                                                <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between">
-                                                    <span>Linked Income</span><span className="text-emerald-600">${linkedAmount.toFixed(2)}</span>
-                                                </div>
-                                                <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between">
-                                                    <span>Outstanding</span><span className={unpaidAmount > 0 ? 'text-rose-500' : 'text-emerald-600'}>${unpaidAmount.toFixed(2)}</span>
-                                                </div>
+
+                                {tx.isSplit && tx.splitData?.length > 0 && (
+                                    <div className="mt-6 pt-6 border-t border-slate-50">
+                                        <button onClick={() => setOpenSplits(prev => ({ ...prev, [tx.id]: !prev[tx.id] }))} className="w-full flex items-center justify-between bg-slate-50 rounded-2xl px-5 py-4 text-left">
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bill Split Section</p>
+                                                <p className="text-sm font-black text-slate-800">{tx.splitData.length} share(s)</p>
                                             </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                            {tx.receiptData && (
-                                <button onClick={() => setViewReceipt(tx.receiptData)} className="mt-6 flex items-center gap-2 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:underline"><ImageIcon size={14}/> View AI Scan</button>
-                            )}
-                        </div>
-                    ))}
+                                            {isOpen ? <ChevronUp size={18} className="text-slate-500" /> : <ChevronDown size={18} className="text-slate-500" />}
+                                        </button>
+
+                                        {isOpen && (
+                                            <div className="mt-4 space-y-4">
+                                                <div className="flex flex-wrap gap-3">
+                                                    {tx.splitData.map((p, idx) => (
+                                                        <button key={idx} onClick={() => onTogglePaid(tx.id, idx)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[10px] font-black transition-all ${p.paid ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
+                                                            {p.paid ? <CheckCircle size={14}/> : <Circle size={14}/>} {p.name.toUpperCase()}: ${parseFloat(p.amount || 0).toFixed(2)}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                {tx.category === 'Utilities' && (
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {tx.splitData.map((p, idx) => {
+                                                            const linkedAmount = getLinkedAmountForShare(incomeLogs, tx.id, idx);
+                                                            const unpaidAmount = Math.max((parseFloat(p.amount) || 0) - linkedAmount, 0);
+                                                            return (
+                                                                <div key={`${tx.id}-${idx}`} className="bg-slate-50 rounded-2xl p-4">
+                                                                    <div className="flex items-center justify-between gap-3">
+                                                                        <div>
+                                                                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Bill Split</p>
+                                                                            <p className="text-sm font-black text-slate-900">{p.name}</p>
+                                                                        </div>
+                                                                        <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${unpaidAmount <= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>{unpaidAmount <= 0 ? 'Paid Off' : 'Unpaid'}</div>
+                                                                    </div>
+                                                                    <div className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Share</span><span>${(parseFloat(p.amount) || 0).toFixed(2)}</span></div>
+                                                                    <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Linked Income</span><span className="text-emerald-600">${linkedAmount.toFixed(2)}</span></div>
+                                                                    <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Outstanding</span><span className={unpaidAmount > 0 ? 'text-rose-500' : 'text-emerald-600'}>${unpaidAmount.toFixed(2)}</span></div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {(tx.receiptData || tx.receiptFile?.data) && (
+                                    <div className="mt-6 flex flex-wrap gap-3">
+                                        <button onClick={() => setViewReceipt(tx.receiptFile || { data: tx.receiptData, type: 'image/jpeg', name: `${tx.description || 'receipt'}.jpg` })} className="flex items-center gap-2 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:underline"><ImageIcon size={14}/> View Receipt</button>
+                                        {tx.receiptFile?.data && (
+                                            <button onClick={() => downloadDataUrl(tx.receiptFile.data, tx.receiptFile.name || 'receipt')} className="flex items-center gap-2 text-emerald-600 text-[10px] font-black uppercase tracking-widest hover:underline"><Download size={14}/> Download Saved File</button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             );
         }
@@ -312,32 +371,16 @@
                     {sorted.map(inc => (
                         <div key={inc.id} className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
                             <div className="flex gap-4 md:gap-6 items-center">
-                                <div className={`p-4 rounded-2xl bg-emerald-50 text-emerald-600 shrink-0`}>
-                                    <ArrowUpCircle size={24}/>
-                                </div>
+                                <div className="p-4 rounded-2xl bg-emerald-50 text-emerald-600 shrink-0"><ArrowUpCircle size={24}/></div>
                                 <div>
                                     <h4 className="font-black text-slate-800 text-lg md:text-xl uppercase tracking-tight">{inc.description}</h4>
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
-                                        {inc.date} • Paid in {inc.paidInDate || inc.date} • Funded to <span className="text-indigo-600">{inc.category}</span>
-                                    </p>
-                                    {inc.payer && (
-                                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mt-2">
-                                            Payer: <span className="text-slate-500">{inc.payer}</span>
-                                        </p>
-                                    )}
-                                    {inc.linkedBills?.length > 0 && (
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                            {inc.linkedBills.map((link, idx) => (
-                                                <span key={`${inc.id}-link-${idx}`} className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest">
-                                                    {link.personName}: {link.billDescription} · ${parseFloat(link.amount || 0).toFixed(2)}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    )}
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{inc.date} • Paid in {inc.paidInDate || inc.date} • Funded to <span className="text-indigo-600">{inc.category}</span></p>
+                                    {inc.payer && <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mt-2">Payer: <span className="text-slate-500">{inc.payer}</span></p>}
+                                    {inc.linkedBills?.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{inc.linkedBills.map((link, idx) => <span key={`${inc.id}-${idx}`} className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest">{link.personName}: {link.billDescription} · ${parseFloat(link.amount || 0).toFixed(2)}</span>)}</div>}
                                 </div>
                             </div>
                             <div className="flex items-center justify-between sm:justify-end gap-10">
-                                <span className="text-2xl md:text-3xl font-black text-emerald-600 tracking-tighter">+${parseFloat(inc.amount).toFixed(2)}</span>
+                                <span className="text-2xl md:text-3xl font-black text-emerald-600 tracking-tighter">+${parseFloat(inc.amount || 0).toFixed(2)}</span>
                                 <button onClick={() => onDelete(inc.id, 'income')} className="p-2 text-slate-200 hover:text-rose-500 rounded-xl transition-colors"><Trash2 size={24}/></button>
                             </div>
                         </div>
@@ -347,14 +390,13 @@
         }
 
         function AddEntryModal({ onClose, onSave, transactions, incomeLogs }) {
+            const today = new Date().toISOString().split('T')[0];
             const [formData, setFormData] = useState({
-                type: 'expense', amount: '', category: 'Food', description: '', companyName: '',
-                date: new Date().toISOString().split('T')[0], paidInDate: new Date().toISOString().split('T')[0], dueDate: new Date().toISOString().split('T')[0],
-                receiptData: null, isSplit: false, payer: '', linkedBills: [],
+                type: 'expense', amount: '', category: 'Food', description: '', companyName: '', date: today, paidInDate: today, dueDate: today,
+                receiptData: null, receiptFile: null, isSplit: false, payer: '', linkedBills: [],
                 splitData: [{ name: 'Person 1', amount: '', paid: false }, { name: 'Person 2', amount: '', paid: false }]
             });
             const [scanning, setScanning] = useState(false);
-
             const utilityBills = useMemo(() => transactions.filter(tx => tx.category === 'Utilities').sort((a,b) => new Date(b.date) - new Date(a.date)), [transactions]);
 
             const calculateRemaining = () => {
@@ -363,40 +405,49 @@
                 return (total - allocated).toFixed(2);
             };
 
-            const handleScan = async (file, mode) => {
+            const scanReceiptFile = async (file, mode) => {
                 if (!file) return;
                 setScanning(true);
                 try {
-                    const base64 = await resizeImage(file);
+                    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+                    const fileDataUrl = await fileToDataUrl(file);
+                    const previewImage = isPdf ? await renderPdfFirstPageToImage(file) : await resizeImage(file);
                     let content;
                     try {
                         const res = await callGeminiWithRetry({
-                            contents: [{
-                                parts: [
-                                    { text: `Extract data from this ${mode} receipt. Return ONLY JSON: { "total": number, "vendor": string, "date": "YYYY-MM-DD", "isUtility": boolean }.` },
-                                    { inlineData: { mimeType: "image/jpeg", data: base64.split(',')[1] } }
-                                ]
-                            }],
-                            generationConfig: { responseMimeType: "application/json" }
+                            contents: [{ parts: [
+                                { text: `Extract data from this ${mode} bill or receipt. Return ONLY JSON: { "total": number, "vendor": string, "date": "YYYY-MM-DD", "isUtility": boolean }.` },
+                                { inlineData: { mimeType: 'image/jpeg', data: previewImage.split(',')[1] } }
+                            ]}],
+                            generationConfig: { responseMimeType: 'application/json' }
                         });
                         content = JSON.parse(res.candidates[0].content.parts[0].text);
                     } catch (geminiError) {
-                        console.warn('Gemini scan unavailable, falling back to local OCR.', geminiError);
-                        content = await runLocalReceiptScan(file, mode);
+                        console.warn('Gemini scan unavailable, using local OCR/pdf rendering fallback.', geminiError);
+                        content = await runLocalReceiptScan(previewImage, mode);
                     }
                     const total = parseFloat(content.total) || 0;
                     const splitSeed = total > 0 ? (total / 2).toFixed(2) : '';
                     setFormData(prev => ({
-                        ...prev, type: 'expense', amount: total || '', description: content.vendor || '', companyName: content.vendor || '', 
-                        date: normalizeDate(content.date || prev.date), receiptData: base64, 
+                        ...prev,
+                        type: 'expense',
+                        amount: total || '',
+                        description: content.vendor || prev.description,
+                        companyName: content.vendor || prev.companyName,
+                        date: normalizeDate(content.date || prev.date),
+                        dueDate: normalizeDate(content.date || prev.dueDate),
                         category: (content.isUtility || mode === 'utility') ? 'Utilities' : 'Food',
                         isSplit: content.isUtility || mode === 'utility',
-                        splitData: [{ name: 'Person 1', amount: splitSeed, paid: false }, { name: 'Person 2', amount: splitSeed, paid: false }]
+                        splitData: [{ name: 'Person 1', amount: splitSeed, paid: false }, { name: 'Person 2', amount: splitSeed, paid: false }],
+                        receiptData: previewImage,
+                        receiptFile: { name: file.name, type: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'), data: fileDataUrl }
                     }));
-                } catch (e) {
-                    console.error("Scan failed", e);
-                    alert('Receipt scan could not read this file. You can still enter the bill manually.');
-                } finally { setScanning(false); }
+                } catch (error) {
+                    console.error('Scan failed', error);
+                    alert('Receipt or PDF scan failed. You can still fill the bill manually.');
+                } finally {
+                    setScanning(false);
+                }
             };
 
             return (
@@ -408,71 +459,59 @@
                         </div>
                         <div className="p-6 sm:p-8 pt-6 overflow-y-auto space-y-6 no-scrollbar">
                             <div className="flex bg-slate-50 p-1.5 rounded-2xl shrink-0">
-                                <button onClick={() => setFormData({...formData, type: 'expense'})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${formData.type === 'expense' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>Expense</button>
-                                <button onClick={() => setFormData({...formData, type: 'income'})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${formData.type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>Fund</button>
+                                <button onClick={() => setFormData(prev => ({ ...prev, type: 'expense' }))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${formData.type === 'expense' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>Expense</button>
+                                <button onClick={() => setFormData(prev => ({ ...prev, type: 'income' }))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${formData.type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>Fund</button>
                             </div>
-                            
+
                             {formData.type === 'expense' && (
                                 <div className="grid grid-cols-2 gap-4">
                                     <label className={`flex flex-col items-center p-4 border-2 border-dashed rounded-3xl cursor-pointer transition-all ${scanning ? 'bg-slate-50 border-slate-200 opacity-50' : 'border-slate-200 hover:bg-amber-50 hover:border-amber-200'}`}>
                                         <ShoppingCart size={24} className="mb-2 text-amber-500" />
                                         <span className="text-[9px] font-black uppercase tracking-widest">{scanning ? 'Scanning...' : 'Food Scan'}</span>
-                                        <input type="file" className="hidden" accept="image/*" disabled={scanning} onChange={e => handleScan(e.target.files[0], 'grocery')} />
+                                        <input type="file" className="hidden" accept="image/*,.pdf,application/pdf" disabled={scanning} onChange={e => scanReceiptFile(e.target.files[0], 'grocery')} />
                                     </label>
                                     <label className={`flex flex-col items-center p-4 border-2 border-dashed rounded-3xl cursor-pointer transition-all ${scanning ? 'bg-slate-50 border-slate-200 opacity-50' : 'border-slate-200 hover:bg-blue-50 hover:border-blue-200'}`}>
                                         <Zap size={24} className="mb-2 text-blue-500" />
-                                        <span className="text-[9px] font-black uppercase tracking-widest">{scanning ? 'Scanning...' : 'Utility Scan'}</span>
-                                        <input type="file" className="hidden" accept="image/*" disabled={scanning} onChange={e => handleScan(e.target.files[0], 'utility')} />
+                                        <span className="text-[9px] font-black uppercase tracking-widest">{scanning ? 'Scanning...' : 'Utility PDF / Scan'}</span>
+                                        <input type="file" className="hidden" accept="image/*,.pdf,application/pdf" disabled={scanning} onChange={e => scanReceiptFile(e.target.files[0], 'utility')} />
                                     </label>
                                 </div>
                             )}
 
                             <div className="space-y-4">
-                                <input type="number" step="0.01" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} className="w-full bg-slate-50 p-5 rounded-2xl border-none font-black text-4xl placeholder:text-slate-200 outline-none focus:ring-2 ring-indigo-500/20" placeholder="0.00" />
-                                <input type="text" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value, companyName: e.target.value})} className="w-full bg-slate-50 p-4 rounded-xl border-none font-bold placeholder:text-slate-300 outline-none focus:ring-2 ring-indigo-500/20 text-sm" placeholder="Vendor / Source Name" />
-                                <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full bg-slate-50 p-4 rounded-xl border-none font-bold text-slate-500 outline-none focus:ring-2 ring-indigo-500/20 text-sm">
+                                <input type="number" step="0.01" value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })} className="w-full bg-slate-50 p-5 rounded-2xl border-none font-black text-4xl placeholder:text-slate-200 outline-none" placeholder="0.00" />
+                                <input type="text" value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value, companyName: e.target.value })} className="w-full bg-slate-50 p-4 rounded-xl border-none font-bold text-sm" placeholder="Vendor / Source Name" />
+                                <select value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value })} className="w-full bg-slate-50 p-4 rounded-xl border-none font-bold text-slate-500 text-sm">
                                     <option value="Food">Grocery Fund</option>
                                     <option value="Utilities">Utility Fund</option>
                                 </select>
                                 {formData.type === 'expense' && formData.category === 'Utilities' && (
                                     <div className="space-y-2">
                                         <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Utility Bill Due Date</label>
-                                        <input type="date" value={formData.dueDate} onChange={e => setFormData({...formData, dueDate: e.target.value})} className="w-full bg-slate-50 p-4 rounded-xl border-none font-bold outline-none focus:ring-2 ring-indigo-500/10 text-sm" />
+                                        <input type="date" value={formData.dueDate} onChange={e => setFormData({ ...formData, dueDate: e.target.value })} className="w-full bg-slate-50 p-4 rounded-xl border-none font-bold text-sm" />
                                     </div>
                                 )}
                                 {formData.type === 'income' && (
                                     <div className="bg-slate-50 p-5 rounded-2xl space-y-4">
                                         <div className="space-y-2">
                                             <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Paid Into Account Date</label>
-                                            <input type="date" value={formData.paidInDate} onChange={e => setFormData({...formData, paidInDate: e.target.value})} className="w-full bg-white p-4 rounded-xl border-none font-bold text-sm" />
+                                            <input type="date" value={formData.paidInDate} onChange={e => setFormData({ ...formData, paidInDate: e.target.value })} className="w-full bg-white p-4 rounded-xl border-none font-bold text-sm" />
                                         </div>
-                                        <input type="text" value={formData.payer} onChange={e => setFormData({...formData, payer: e.target.value})} className="w-full bg-white p-4 rounded-xl border-none font-bold text-sm" placeholder="Person paying this income" />
+                                        <input type="text" value={formData.payer} onChange={e => setFormData({ ...formData, payer: e.target.value })} className="w-full bg-white p-4 rounded-xl border-none font-bold text-sm" placeholder="Person paying this income" />
                                         {formData.category === 'Utilities' && (
                                             <div className="space-y-3">
-                                                <div>
-                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Apply utility income to unpaid bill splits</p>
-                                                    <p className="text-[10px] font-bold text-slate-400 mt-1">Tick the bills this payment clears for the selected person.</p>
-                                                </div>
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Tick unpaid utility shares for this income</p>
                                                 <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                                                     {utilityBills.filter(bill => bill.isSplit && bill.splitData?.length).map(bill => {
                                                         const matchingShares = bill.splitData
-                                                            .map((split, splitIndex) => {
-                                                                const linkedAmount = getLinkedAmountForShare(incomeLogs, bill.id, splitIndex);
-                                                                const shareAmount = parseFloat(split.amount) || 0;
-                                                                return { split, splitIndex, unpaidAmount: Math.max(shareAmount - linkedAmount, 0) };
-                                                            })
+                                                            .map((split, splitIndex) => ({ split, splitIndex, unpaidAmount: Math.max((parseFloat(split.amount) || 0) - getLinkedAmountForShare(incomeLogs, bill.id, splitIndex), 0) }))
                                                             .filter(({ split, unpaidAmount }) => unpaidAmount > 0 && (!formData.payer || split.name.toLowerCase().includes(formData.payer.toLowerCase()) || formData.payer.toLowerCase().includes(split.name.toLowerCase())));
                                                         if (matchingShares.length === 0) return null;
                                                         return (
                                                             <div key={bill.id} className="bg-white rounded-2xl p-4 border border-slate-100">
-                                                                <div className="flex items-start justify-between gap-3 mb-3">
-                                                                    <div>
-                                                                        <p className="text-sm font-black text-slate-900">{bill.description}</p>
-                                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">{bill.date}</p>
-                                                                    </div>
-                                                                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Utility Bill</span>
-                                                                </div>
-                                                                <div className="space-y-2">
+                                                                <p className="text-sm font-black text-slate-900">{bill.description}</p>
+                                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">{bill.date}{bill.dueDate ? ` • Due ${bill.dueDate}` : ''}</p>
+                                                                <div className="space-y-2 mt-3">
                                                                     {matchingShares.map(({ split, splitIndex, unpaidAmount }) => {
                                                                         const checked = formData.linkedBills.some(link => link.billId === bill.id && link.personIndex === splitIndex);
                                                                         return (
@@ -482,7 +521,7 @@
                                                                                         const linkedBills = e.target.checked
                                                                                             ? [...formData.linkedBills, { billId: bill.id, billDescription: bill.description, personIndex: splitIndex, personName: split.name, amount: unpaidAmount }]
                                                                                             : formData.linkedBills.filter(link => !(link.billId === bill.id && link.personIndex === splitIndex));
-                                                                                        setFormData({...formData, linkedBills});
+                                                                                        setFormData({ ...formData, linkedBills });
                                                                                     }} className="w-4 h-4" />
                                                                                     <span>{split.name}</span>
                                                                                 </span>
@@ -504,53 +543,36 @@
                             {formData.type === 'expense' && (
                                 <div className="space-y-4 pt-2">
                                     <label className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl cursor-pointer hover:bg-slate-100 transition-colors">
-                                        <input type="checkbox" className="w-5 h-5 rounded-md text-indigo-600 border-none bg-slate-200 focus:ring-0" 
-                                            checked={formData.isSplit} 
-                                            onChange={e => setFormData({...formData, isSplit: e.target.checked})} />
+                                        <input type="checkbox" className="w-5 h-5" checked={formData.isSplit} onChange={e => setFormData({ ...formData, isSplit: e.target.checked })} />
                                         <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Manual Split Cost</span>
                                     </label>
-
                                     {formData.isSplit && (
                                         <div className="bg-slate-50 p-6 rounded-[2rem] space-y-4">
                                             <div className="flex justify-between items-center mb-2">
                                                 <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Allocate Amounts</p>
-                                                <p className={`text-[10px] font-black uppercase tracking-widest ${parseFloat(calculateRemaining()) !== 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                                                    Remaining: ${calculateRemaining()}
-                                                </p>
+                                                <p className={`text-[10px] font-black uppercase tracking-widest ${parseFloat(calculateRemaining()) !== 0 ? 'text-rose-500' : 'text-emerald-500'}`}>Remaining: ${calculateRemaining()}</p>
                                             </div>
                                             {formData.splitData.map((p, idx) => (
                                                 <div key={idx} className="flex gap-3">
-                                                    <input type="text" value={p.name} onChange={e => {
-                                                        const next = [...formData.splitData];
-                                                        next[idx].name = e.target.value;
-                                                        setFormData({...formData, splitData: next});
-                                                    }} className="flex-1 bg-white p-3 rounded-xl border-none font-bold text-xs" placeholder="Name" />
-                                                    <input type="number" value={p.amount} onChange={e => {
-                                                        const next = [...formData.splitData];
-                                                        next[idx].amount = e.target.value;
-                                                        setFormData({...formData, splitData: next});
-                                                    }} className="w-28 bg-white p-3 rounded-xl border-none font-bold text-xs text-right" placeholder="0.00" />
+                                                    <input type="text" value={p.name} onChange={e => { const next = [...formData.splitData]; next[idx].name = e.target.value; setFormData({ ...formData, splitData: next }); }} className="flex-1 bg-white p-3 rounded-xl border-none font-bold text-xs" placeholder="Name" />
+                                                    <input type="number" value={p.amount} onChange={e => { const next = [...formData.splitData]; next[idx].amount = e.target.value; setFormData({ ...formData, splitData: next }); }} className="w-28 bg-white p-3 rounded-xl border-none font-bold text-xs text-right" placeholder="0.00" />
                                                 </div>
                                             ))}
-                                            <button onClick={() => setFormData({...formData, splitData: [...formData.splitData, { name: 'Person ' + (formData.splitData.length + 1), amount: '', paid: false }]})} className="w-full py-3 border-2 border-dashed border-slate-200 text-slate-300 rounded-xl hover:text-indigo-400 hover:border-indigo-200 transition-all">
-                                                <Plus size={16} className="mx-auto" />
-                                            </button>
+                                            <button onClick={() => setFormData({ ...formData, splitData: [...formData.splitData, { name: `Person ${formData.splitData.length + 1}`, amount: '', paid: false }] })} className="w-full py-3 border-2 border-dashed border-slate-200 text-slate-300 rounded-xl hover:text-indigo-400 hover:border-indigo-200 transition-all"><Plus size={16} className="mx-auto" /></button>
                                         </div>
                                     )}
                                 </div>
                             )}
                         </div>
                         <div className="p-8 border-t border-slate-50 shrink-0">
-                            <button onClick={() => onSave(formData)} disabled={!formData.amount || !formData.description} className={`w-full py-5 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all ${(!formData.amount || !formData.description) ? 'bg-slate-200 text-slate-400 shadow-none' : formData.type === 'income' ? 'bg-emerald-600 shadow-emerald-200 text-white' : 'bg-indigo-600 shadow-indigo-200 text-white'}`}>
-                                Post to Ledger
-                            </button>
+                            <button onClick={() => onSave(formData)} disabled={!formData.amount || !formData.description} className={`w-full py-5 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] ${(!formData.amount || !formData.description) ? 'bg-slate-200 text-slate-400' : formData.type === 'income' ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}`}>Post to Ledger</button>
                         </div>
                     </div>
                 </div>
             );
         }
 
-        function ReportView({ transactions, incomeLogs }) {
+        function ReportView({ transactions, incomeLogs, onBackupJson, onExportCsv }) {
             const [dateRange, setDateRange] = useState({
                 start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
                 end: new Date().toISOString().split('T')[0]
@@ -558,30 +580,18 @@
             const [options, setOptions] = useState({ food: true, utilities: true, income: true });
             const [groupBy, setGroupBy] = useState('company');
             const [selectedCompanies, setSelectedCompanies] = useState([]);
-
-            const companyOptions = useMemo(() => (
-                [...new Set(
-                    transactions
-                        .map(tx => (tx.companyName || tx.description || '').trim())
-                        .filter(Boolean)
-                )].sort((a, b) => a.localeCompare(b))
-            ), [transactions]);
+            const companyOptions = useMemo(() => [...new Set(transactions.map(tx => (tx.companyName || tx.description || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b)), [transactions]);
 
             const generateReport = () => {
                 const start = new Date(dateRange.start);
                 const end = new Date(dateRange.end);
-                
                 const filteredTx = transactions.filter(t => {
                     const d = new Date(t.date);
                     const companyName = (t.companyName || t.description || '').trim();
                     const companyMatch = selectedCompanies.length === 0 || selectedCompanies.includes(companyName);
                     return d >= start && d <= end && companyMatch && ((t.category === 'Food' && options.food) || (t.category === 'Utilities' && options.utilities));
                 });
-
-                const filteredInc = options.income 
-                    ? incomeLogs.filter(i => { const d = new Date(i.date); return d >= start && d <= end; })
-                    : [];
-
+                const filteredInc = options.income ? incomeLogs.filter(i => { const d = new Date(i.date); return d >= start && d <= end; }) : [];
                 const groupedExpenses = filteredTx.reduce((acc, tx) => {
                     const key = groupBy === 'company' ? (tx.companyName || tx.description || 'Unknown Company') : tx.category;
                     acc[key] = acc[key] || { total: 0, items: [] };
@@ -589,161 +599,50 @@
                     acc[key].items.push(tx);
                     return acc;
                 }, {});
-
                 const utilityBillStatus = filteredTx.filter(tx => tx.category === 'Utilities' && tx.isSplit && tx.splitData).map(tx => ({
                     ...tx,
                     shares: tx.splitData.map((share, index) => {
                         const linkedAmount = getLinkedAmountForShare(filteredInc, tx.id, index);
                         const shareAmount = parseFloat(share.amount) || 0;
-                        const outstanding = Math.max(shareAmount - linkedAmount, 0);
-                        return { ...share, shareAmount, linkedAmount, outstanding };
+                        return { ...share, shareAmount, linkedAmount, outstanding: Math.max(shareAmount - linkedAmount, 0) };
                     })
                 }));
-
                 const printWindow = window.open('', '_blank');
                 if (!printWindow) return;
-
                 const html = `
-                    <html>
-                    <head>
-                        <title>HouseBank Ledger Report</title>
-                        <script src="https://cdn.tailwindcss.com"><\/script>
-                        <style>
-                            @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
-                            body { font-family: 'Plus Jakarta Sans', sans-serif; }
-                            @media print { .no-print { display: none; } }
-                        </style>
-                    </head>
-                    <body class="p-12 text-slate-900">
-                        <div class="max-w-4xl mx-auto">
-                            <div class="flex justify-between items-start mb-16">
-                                <div>
-                                    <h1 class="text-5xl font-black uppercase tracking-tighter mb-2">Audit Report</h1>
-                                    <p class="text-slate-400 font-bold uppercase tracking-widest text-xs">${dateRange.start} to ${dateRange.end}</p>
-                                    <p class="text-slate-300 font-bold uppercase tracking-widest text-[10px] mt-2">Grouped by ${groupBy === 'company' ? 'company / shop' : 'fund category'}</p>
-                                </div>
-                                <div class="text-right">
-                                    <p class="font-black text-indigo-600 uppercase tracking-widest text-sm">HouseBank Premium AI</p>
-                                </div>
-                            </div>
-
-                            <div class="space-y-12">
-                                ${options.income && filteredInc.length > 0 ? `
-                                    <section>
-                                        <h2 class="text-xs font-black uppercase tracking-[0.3em] text-emerald-600 mb-6 pb-2 border-b-2 border-emerald-50">Funding Inflow</h2>
-                                        <table class="w-full text-left">
-                                            <thead><tr class="text-[10px] font-black uppercase tracking-widest text-slate-400"><th class="pb-4">Entry Date</th><th class="pb-4">Paid In</th><th class="pb-4">Source</th><th class="pb-4">Category</th><th class="pb-4 text-right">Amount</th></tr></thead>
-                                            <tbody class="text-sm font-bold">${filteredInc.map(i => `<tr class="border-b border-slate-50"><td class="py-4">${i.date}</td><td class="py-4">${i.paidInDate || i.date}</td><td class="py-4">${i.description}</td><td class="py-4">${i.category}</td><td class="py-4 text-right text-emerald-600">+$${parseFloat(i.amount).toFixed(2)}</td></tr>`).join('')}</tbody>
-                                        </table>
-                                    </section>
-                                ` : ''}
-
-                                ${filteredTx.length > 0 ? `
-                                    <section>
-                                        <h2 class="text-xs font-black uppercase tracking-[0.3em] text-rose-600 mb-6 pb-2 border-b-2 border-rose-50">Expense Outflow</h2>
-                                        <table class="w-full text-left">
-                                            <thead><tr class="text-[10px] font-black uppercase tracking-widest text-slate-400"><th class="pb-4">Date</th><th class="pb-4">Due Date</th><th class="pb-4">Vendor</th><th class="pb-4">Category</th><th class="pb-4 text-right">Amount</th></tr></thead>
-                                            <tbody class="text-sm font-bold">${filteredTx.map(t => `<tr class="border-b border-slate-50"><td class="py-4">${t.date}</td><td class="py-4">${t.category === 'Utilities' ? (t.dueDate || '-') : '-'}</td><td class="py-4">${t.companyName || t.description}</td><td class="py-4">${t.category}</td><td class="py-4 text-right">-$${parseFloat(t.amount).toFixed(2)}</td></tr>`).join('')}</tbody>
-                                        </table>
-                                    </section>
-                                    <section>
-                                        <h2 class="text-xs font-black uppercase tracking-[0.3em] text-slate-700 mb-6 pb-2 border-b-2 border-slate-100">Report by ${groupBy === 'company' ? 'Company / Shop' : 'Category'}</h2>
-                                        <table class="w-full text-left">
-                                            <thead><tr class="text-[10px] font-black uppercase tracking-widest text-slate-400"><th class="pb-4">Group</th><th class="pb-4">Records</th><th class="pb-4 text-right">Total</th></tr></thead>
-                                            <tbody class="text-sm font-bold">${Object.entries(groupedExpenses).map(([group, data]) => `<tr class="border-b border-slate-50"><td class="py-4">${group}</td><td class="py-4">${data.items.length}</td><td class="py-4 text-right">-$${data.total.toFixed(2)}</td></tr>`).join('')}</tbody>
-                                        </table>
-                                    </section>
-                                    ${utilityBillStatus.length > 0 ? `<section>
-                                        <h2 class="text-xs font-black uppercase tracking-[0.3em] text-blue-600 mb-6 pb-2 border-b-2 border-blue-50">Utility Bill Split Status</h2>
-                                        <div class="space-y-6">${utilityBillStatus.map(bill => `<div class="border border-slate-100 rounded-3xl p-6"><div class="flex justify-between items-start gap-4 mb-4"><div><h3 class="text-lg font-black">${bill.description}</h3><p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">${bill.date}${bill.dueDate ? ` • Due ${bill.dueDate}` : ''}</p></div><div class="text-right"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Bill Total</p><p class="text-lg font-black">$${parseFloat(bill.amount).toFixed(2)}</p></div></div><table class="w-full text-left"><thead><tr class="text-[10px] font-black uppercase tracking-widest text-slate-400"><th class="pb-3">Person</th><th class="pb-3 text-right">Share</th><th class="pb-3 text-right">Income Linked</th><th class="pb-3 text-right">Outstanding</th><th class="pb-3 text-right">Status</th></tr></thead><tbody>${bill.shares.map(share => `<tr class="border-t border-slate-50"><td class="py-3">${share.name}</td><td class="py-3 text-right">$${share.shareAmount.toFixed(2)}</td><td class="py-3 text-right text-emerald-600">$${share.linkedAmount.toFixed(2)}</td><td class="py-3 text-right ${share.outstanding > 0 ? 'text-rose-600' : 'text-emerald-600'}">$${share.outstanding.toFixed(2)}</td><td class="py-3 text-right">${share.paid || share.outstanding <= 0 ? 'Paid Off' : 'Unpaid'}</td></tr>`).join('')}</tbody></table></div>`).join('')}</div>
-                                    </section>` : ''}
-                                ` : ''}
-                            </div>
-
-                            <div class="mt-20 pt-10 border-t-4 border-slate-900 flex justify-between">
-                                <span class="text-xl font-black uppercase tracking-widest">Net House Balance</span>
-                                <span class="text-3xl font-black">$${(filteredInc.reduce((a,b)=>a+parseFloat(b.amount),0) - filteredTx.reduce((a,b)=>a+parseFloat(b.amount),0)).toFixed(2)}</span>
-                            </div>
-
-                            <div class="mt-20 no-print flex gap-4">
-                                <button onclick="window.print()" class="bg-indigo-600 text-white px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl">Print PDF Now</button>
-                                <button onclick="window.close()" class="bg-slate-100 text-slate-400 px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest">Close Preview</button>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                `;
+                    <html><head><title>HouseBank Ledger Report</title><script src="https://cdn.tailwindcss.com"><\/script></head>
+                    <body class="p-12 text-slate-900"><div class="max-w-4xl mx-auto">
+                    <div class="flex justify-between items-start mb-16"><div><h1 class="text-5xl font-black uppercase tracking-tighter mb-2">Audit Report</h1><p class="text-slate-400 font-bold uppercase tracking-widest text-xs">${dateRange.start} to ${dateRange.end}</p></div><div class="text-right"><p class="font-black text-indigo-600 uppercase tracking-widest text-sm">HouseBank Premium AI</p></div></div>
+                    ${filteredInc.length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-emerald-600 mb-6">Funding Inflow</h2><table class="w-full text-left"><thead><tr><th>Entry Date</th><th>Paid In</th><th>Source</th><th>Category</th><th class="text-right">Amount</th></tr></thead><tbody>${filteredInc.map(i => `<tr><td class="py-2">${i.date}</td><td class="py-2">${i.paidInDate || i.date}</td><td class="py-2">${i.description}</td><td class="py-2">${i.category}</td><td class="py-2 text-right">+$${parseFloat(i.amount || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
+                    ${filteredTx.length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-rose-600 mb-6">Expense Outflow</h2><table class="w-full text-left"><thead><tr><th>Date</th><th>Due Date</th><th>Vendor</th><th>Category</th><th class="text-right">Amount</th></tr></thead><tbody>${filteredTx.map(t => `<tr><td class="py-2">${t.date}</td><td class="py-2">${t.category === 'Utilities' ? (t.dueDate || '-') : '-'}</td><td class="py-2">${t.companyName || t.description}</td><td class="py-2">${t.category}</td><td class="py-2 text-right">-$${parseFloat(t.amount || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
+                    ${Object.keys(groupedExpenses).length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-slate-700 mb-6">Report by ${groupBy === 'company' ? 'Company / Shop' : 'Category'}</h2><table class="w-full text-left"><thead><tr><th>Group</th><th>Records</th><th class="text-right">Total</th></tr></thead><tbody>${Object.entries(groupedExpenses).map(([group, data]) => `<tr><td class="py-2">${group}</td><td class="py-2">${data.items.length}</td><td class="py-2 text-right">-$${data.total.toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
+                    ${utilityBillStatus.length ? `<section><h2 class="text-xs font-black uppercase tracking-[0.3em] text-blue-600 mb-6">Utility Bill Split Status</h2>${utilityBillStatus.map(bill => `<div class="border border-slate-100 rounded-3xl p-6 mb-6"><h3 class="text-lg font-black">${bill.description}</h3><p class="text-xs text-slate-400">${bill.date}${bill.dueDate ? ` • Due ${bill.dueDate}` : ''}</p><table class="w-full text-left mt-4"><thead><tr><th>Person</th><th class="text-right">Share</th><th class="text-right">Income Linked</th><th class="text-right">Outstanding</th></tr></thead><tbody>${bill.shares.map(share => `<tr><td class="py-2">${share.name}</td><td class="py-2 text-right">$${share.shareAmount.toFixed(2)}</td><td class="py-2 text-right">$${share.linkedAmount.toFixed(2)}</td><td class="py-2 text-right">$${share.outstanding.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`).join('')}</section>` : ''}
+                    <div class="mt-20 no-print flex gap-4"><button onclick="window.print()" class="bg-indigo-600 text-white px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest">Print PDF Now</button><button onclick="window.close()" class="bg-slate-100 text-slate-400 px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest">Close Preview</button></div>
+                    </div></body></html>`;
                 printWindow.document.write(html);
                 printWindow.document.close();
             };
 
             return (
-                <div className="max-w-2xl mx-auto space-y-10 py-10">
+                <div className="max-w-3xl mx-auto space-y-10 py-10">
                     <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
                         <div>
                             <h3 className="text-xl font-black uppercase tracking-tighter mb-2 text-indigo-600">Configure Statement</h3>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select filters for your exported PDF</p>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select filters, backup your database, or export CSV</p>
                         </div>
-                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <button onClick={onBackupJson} className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest"><Database size={16}/> Backup Database JSON</button>
+                            <button onClick={onExportCsv} className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-600 text-white font-black text-[10px] uppercase tracking-widest"><FileText size={16}/> Download Ledger CSV</button>
+                        </div>
                         <div className="grid grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">From Date</label>
-                                <input type="date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl border-none font-bold outline-none focus:ring-2 ring-indigo-500/10" />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">To Date</label>
-                                <input type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl border-none font-bold outline-none focus:ring-2 ring-indigo-500/10" />
-                            </div>
+                            <div className="space-y-2"><label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">From Date</label><input type="date" value={dateRange.start} onChange={e => setDateRange({ ...dateRange, start: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border-none font-bold" /></div>
+                            <div className="space-y-2"><label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">To Date</label><input type="date" value={dateRange.end} onChange={e => setDateRange({ ...dateRange, end: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border-none font-bold" /></div>
                         </div>
-
-                        <div className="space-y-4">
-                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Group Expense Reporting</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <button onClick={() => setGroupBy('company')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border-2 ${groupBy === 'company' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Company / Shop</button>
-                                <button onClick={() => setGroupBy('category')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border-2 ${groupBy === 'category' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Fund Category</button>
-                            </div>
-                        </div>
-
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Filter by Shop / Company</p>
-                                {selectedCompanies.length > 0 && (
-                                    <button onClick={() => setSelectedCompanies([])} className="text-[10px] font-black uppercase tracking-widest text-indigo-600">
-                                        Clear
-                                    </button>
-                                )}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                {companyOptions.length === 0 ? (
-                                    <span className="text-[10px] font-bold text-slate-400">No saved shop names yet.</span>
-                                ) : companyOptions.map(company => (
-                                    <button
-                                        key={company}
-                                        onClick={() => setSelectedCompanies(prev => prev.includes(company) ? prev.filter(item => item !== company) : [...prev, company])}
-                                        className={`px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 transition-all ${selectedCompanies.includes(company) ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-50 text-slate-400'}`}
-                                    >
-                                        {company}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="space-y-4">
-                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Include Sections</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                {Object.keys(options).map(key => (
-                                    <button key={key} onClick={() => setOptions({...options, [key]: !options[key]})} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border-2 ${options[key] ? 'bg-indigo-50 border-indigo-200 text-indigo-600 shadow-lg shadow-indigo-50' : 'bg-white border-slate-50 text-slate-400'}`}>
-                                        {key}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        <button onClick={generateReport} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl shadow-slate-200 hover:scale-[1.02] active:scale-95 transition-all">
-                            Preview Report Popup
-                        </button>
+                        <div className="space-y-4"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Group Expense Reporting</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><button onClick={() => setGroupBy('company')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${groupBy === 'company' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Company / Shop</button><button onClick={() => setGroupBy('category')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${groupBy === 'category' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Fund Category</button></div></div>
+                        <div className="space-y-4"><div className="flex items-center justify-between gap-3"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Filter by Shop / Company</p>{selectedCompanies.length > 0 && <button onClick={() => setSelectedCompanies([])} className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Clear</button>}</div><div className="flex flex-wrap gap-2">{companyOptions.length === 0 ? <span className="text-[10px] font-bold text-slate-400">No saved shop names yet.</span> : companyOptions.map(company => <button key={company} onClick={() => setSelectedCompanies(prev => prev.includes(company) ? prev.filter(item => item !== company) : [...prev, company])} className={`px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${selectedCompanies.includes(company) ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-50 text-slate-400'}`}>{company}</button>)}</div></div>
+                        <div className="space-y-4"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Include Sections</p><div className="grid grid-cols-1 sm:grid-cols-3 gap-3">{Object.keys(options).map(key => <button key={key} onClick={() => setOptions({ ...options, [key]: !options[key] })} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${options[key] ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-50 text-slate-400'}`}>{key}</button>)}</div></div>
+                        <button onClick={generateReport} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.2em]">Preview Report Popup</button>
                     </div>
-
                 </div>
             );
         }
@@ -760,13 +659,10 @@
             useEffect(() => {
                 const initAuth = async () => {
                     try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await auth.signInWithCustomToken(__initial_auth_token);
-                        } else {
-                            await auth.signInAnonymously();
-                        }
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await auth.signInWithCustomToken(__initial_auth_token);
+                        else await auth.signInAnonymously();
                     } catch (err) {
-                        console.error("Auth failed", err);
+                        console.error('Auth failed', err);
                         if (err.code !== 'auth/custom-token-mismatch') await auth.signInAnonymously();
                     }
                 };
@@ -778,18 +674,8 @@
             useEffect(() => {
                 if (!user) return;
                 const baseRef = db.collection('artifacts').doc(APP_ID).collection('public').doc('data');
-                const txRef = baseRef.collection('transactions');
-                const incRef = baseRef.collection('income_logs');
-
-                const unsubTx = txRef.onSnapshot((snap) => {
-                    setTransactions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                    setLoading(false);
-                }, (err) => { console.error("Tx Load Error:", err); setLoading(false); });
-
-                const unsubInc = incRef.onSnapshot((snap) => {
-                    setIncomeLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                }, (err) => console.error("Inc Load Error:", err));
-
+                const unsubTx = baseRef.collection('transactions').onSnapshot((snap) => { setTransactions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setLoading(false); }, () => setLoading(false));
+                const unsubInc = baseRef.collection('income_logs').onSnapshot((snap) => setIncomeLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
                 return () => { unsubTx(); unsubInc(); };
             }, [user]);
 
@@ -797,7 +683,9 @@
                 if (!user) return;
                 const normalizedData = {
                     ...data,
-                    companyName: (data.companyName || data.description || '').trim()
+                    companyName: (data.companyName || data.description || '').trim(),
+                    receiptFile: data.receiptFile || null,
+                    receiptData: data.receiptData || null
                 };
                 if (data.type === 'income') normalizedData.paidInDate = data.paidInDate || data.date;
                 if (data.type === 'expense' && data.category === 'Utilities') normalizedData.dueDate = data.dueDate || data.date;
@@ -811,10 +699,7 @@
                         const updatedSplit = [...tx.splitData];
                         const existingLinkedAmount = getLinkedAmountForShare(incomeLogs, link.billId, link.personIndex);
                         const shareAmount = parseFloat(updatedSplit[link.personIndex].amount) || 0;
-                        updatedSplit[link.personIndex] = {
-                            ...updatedSplit[link.personIndex],
-                            paid: existingLinkedAmount + (parseFloat(link.amount) || 0) >= shareAmount
-                        };
+                        updatedSplit[link.personIndex] = { ...updatedSplit[link.personIndex], paid: existingLinkedAmount + (parseFloat(link.amount) || 0) >= shareAmount };
                         await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('transactions').doc(link.billId).update({ splitData: updatedSplit });
                     }
                 }
@@ -830,6 +715,7 @@
             const toggleSplitPaid = async (txId, personIndex) => {
                 if (!user) return;
                 const tx = transactions.find(t => t.id === txId);
+                if (!tx?.splitData) return;
                 const updatedSplit = [...tx.splitData];
                 updatedSplit[personIndex].paid = !updatedSplit[personIndex].paid;
                 await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('transactions').doc(txId).update({ splitData: updatedSplit });
@@ -837,13 +723,46 @@
 
             const categoryStats = useMemo(() => {
                 const stats = { Food: { income: 0, spent: 0 }, Utilities: { income: 0, spent: 0 } };
-                incomeLogs.forEach(inc => { if(stats[inc.category]) stats[inc.category].income += parseFloat(inc.amount) || 0; });
-                transactions.forEach(tx => { if(stats[tx.category]) stats[tx.category].spent += parseFloat(tx.amount) || 0; });
+                incomeLogs.forEach(inc => { if (stats[inc.category]) stats[inc.category].income += parseFloat(inc.amount) || 0; });
+                transactions.forEach(tx => { if (stats[tx.category]) stats[tx.category].spent += parseFloat(tx.amount) || 0; });
                 return stats;
             }, [transactions, incomeLogs]);
 
+            const outstandingBills = useMemo(() => transactions
+                .filter(tx => tx.category === 'Utilities' && tx.isSplit && tx.splitData?.length)
+                .flatMap(tx => tx.splitData.map((split, personIndex) => {
+                    const outstanding = Math.max((parseFloat(split.amount) || 0) - getLinkedAmountForShare(incomeLogs, tx.id, personIndex), 0);
+                    return outstanding > 0 ? { billId: tx.id, billDescription: tx.description, billDate: tx.date, dueDate: tx.dueDate, personName: split.name, personIndex, outstanding } : null;
+                }).filter(Boolean))
+                .sort((a,b) => b.outstanding - a.outstanding), [transactions, incomeLogs]);
+
+            const backupDatabase = () => {
+                const payload = {
+                    exportedAt: new Date().toISOString(),
+                    appId: APP_ID,
+                    transactions,
+                    incomeLogs
+                };
+                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `housebank-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+            };
+
+            const exportCsv = () => {
+                const csv = toCsv(transactions, incomeLogs);
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `housebank-ledger-${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+            };
+
             return (
-                <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
+                <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden">
                     <aside className="w-20 md:w-72 bg-slate-900 text-slate-300 flex flex-col shrink-0">
                         <div className="flex items-center justify-center md:justify-start gap-3 p-8 mb-4 md:mb-10 text-white">
                             <div className="p-2.5 bg-indigo-500 rounded-xl shadow-lg"><Wallet size={24} /></div>
@@ -856,39 +775,35 @@
                                 { id: 'utilities', icon: Zap, label: 'Utilities' },
                                 { id: 'income', icon: ArrowUpCircle, label: 'Vault Income' },
                                 { id: 'reports', icon: Printer, label: 'Audit Reports' },
-                            ].map((item) => (
+                            ].map(item => (
                                 <button key={item.id} onClick={() => setCurrentView(item.id)} className={`flex items-center justify-center md:justify-start gap-4 w-full p-4 rounded-2xl transition-all ${currentView === item.id ? 'bg-indigo-600 text-white shadow-2xl shadow-indigo-900/40' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}>
                                     <item.icon size={22} className="shrink-0" />
                                     <span className="font-bold text-[10px] uppercase tracking-[0.2em] hidden md:block">{item.label}</span>
                                 </button>
                             ))}
                         </nav>
-                        <div className="p-8 border-t border-slate-800 text-[8px] font-black uppercase tracking-[0.3em] text-slate-600 truncate">
-                            VAULT ID: {APP_ID}
+                        <div className="px-6 pb-6 space-y-3">
+                            <button onClick={backupDatabase} className="w-full hidden md:flex items-center justify-center gap-2 bg-slate-800 text-slate-200 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest"><Database size={14}/> Backup JSON</button>
+                            <button onClick={exportCsv} className="w-full hidden md:flex items-center justify-center gap-2 bg-slate-800 text-slate-200 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest"><FileText size={14}/> Export CSV</button>
                         </div>
+                        <div className="p-8 border-t border-slate-800 text-[8px] font-black uppercase tracking-[0.3em] text-slate-600 truncate">VAULT ID: {APP_ID}</div>
                     </aside>
 
                     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                         <header className="h-20 flex items-center justify-between px-6 md:px-12 bg-white border-b border-slate-100 shrink-0">
                             <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">{currentView}</h2>
-                            <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-indigo-600 text-white px-5 md:px-7 py-3.5 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl shadow-indigo-100">
-                                <Plus size={16} /> <span className="hidden sm:inline">Post Transaction</span>
-                            </button>
+                            <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-indigo-600 text-white px-5 md:px-7 py-3.5 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-100"><Plus size={16} /><span className="hidden sm:inline">Post Transaction</span></button>
                         </header>
-
                         <main className="flex-1 overflow-y-auto p-6 md:p-12 no-scrollbar">
                             {loading ? (
-                                <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-300">
-                                    <Loader2 className="text-indigo-500" size={40} />
-                                    <p className="font-black uppercase tracking-[0.4em] text-[10px]">Syncing Data Vault</p>
-                                </div>
+                                <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-300"><Loader2 className="text-indigo-500" size={40} /><p className="font-black uppercase tracking-[0.4em] text-[10px]">Syncing Data Vault</p></div>
                             ) : (
                                 <>
-                                    {currentView === 'dashboard' && <DashboardOverview stats={categoryStats} />}
+                                    {currentView === 'dashboard' && <DashboardOverview stats={categoryStats} outstandingBills={outstandingBills} />}
                                     {currentView === 'groceries' && <TransactionList type="Food" transactions={transactions} incomeLogs={incomeLogs} onDelete={deleteRecord} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
                                     {currentView === 'utilities' && <TransactionList type="Utilities" transactions={transactions} incomeLogs={incomeLogs} onDelete={deleteRecord} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
                                     {currentView === 'income' && <IncomeListView incomeLogs={incomeLogs} onDelete={deleteRecord} />}
-                                    {currentView === 'reports' && <ReportView transactions={transactions} incomeLogs={incomeLogs} />}
+                                    {currentView === 'reports' && <ReportView transactions={transactions} incomeLogs={incomeLogs} onBackupJson={backupDatabase} onExportCsv={exportCsv} />}
                                 </>
                             )}
                         </main>
@@ -897,7 +812,11 @@
                     {isAddModalOpen && <AddEntryModal onClose={() => setIsAddModalOpen(false)} onSave={saveRecord} transactions={transactions} incomeLogs={incomeLogs} />}
                     {receiptToView && (
                         <div className="fixed inset-0 bg-slate-900/98 z-[100] flex items-center justify-center p-8 backdrop-blur-md" onClick={() => setReceiptToView(null)}>
-                            <img src={receiptToView} className="max-w-full max-h-full rounded-[2rem] shadow-2xl border-4 border-white/10" alt="Receipt" />
+                            <div className="max-w-full max-h-full w-full h-full flex items-center justify-center">
+                                {(receiptToView.type || '').includes('pdf')
+                                    ? <iframe title="Receipt PDF" src={receiptToView.data} className="w-full h-full rounded-[2rem] bg-white" />
+                                    : <img src={receiptToView.data} className="max-w-full max-h-full rounded-[2rem] shadow-2xl border-4 border-white/10" alt="Receipt" />}
+                            </div>
                             <button className="absolute top-10 right-10 p-4 bg-white/10 text-white rounded-full"><X size={32}/></button>
                         </div>
                     )}
