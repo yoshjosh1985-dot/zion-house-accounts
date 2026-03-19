@@ -423,6 +423,7 @@
                 splitData: [{ name: 'Person 1', amount: '', paid: false }, { name: 'Person 2', amount: '', paid: false }]
             });
             const [scanning, setScanning] = useState(false);
+            const [saving, setSaving] = useState(false);
             const utilityBills = useMemo(() => transactions.filter(tx => tx.category === 'Utilities').sort((a,b) => new Date(b.date) - new Date(a.date)), [transactions]);
 
             const calculateRemaining = () => {
@@ -485,6 +486,19 @@
                     alert('Receipt or PDF scan failed. You can still fill the bill manually.');
                 } finally {
                     setScanning(false);
+                }
+            };
+
+            const handleSave = async () => {
+                if (!formData.description || (formData.type === 'income' && !formData.amount) || saving) return;
+                setSaving(true);
+                try {
+                    await onSave(formData);
+                } catch (error) {
+                    console.error('Save failed', error);
+                    alert(error?.message || 'Posting to the ledger failed. Please try again.');
+                } finally {
+                    setSaving(false);
                 }
             };
 
@@ -609,7 +623,7 @@
                             )}
                         </div>
                         <div className="p-8 border-t border-slate-50 shrink-0">
-                            <button onClick={() => onSave(formData)} disabled={!formData.description || (formData.type === 'income' && !formData.amount)} className={`w-full py-5 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] ${(!formData.description || (formData.type === 'income' && !formData.amount)) ? 'bg-slate-200 text-slate-400' : formData.type === 'income' ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}`}>Post to Ledger</button>
+                            <button onClick={handleSave} disabled={saving || !formData.description || (formData.type === 'income' && !formData.amount)} className={`w-full py-5 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] ${(saving || !formData.description || (formData.type === 'income' && !formData.amount)) ? 'bg-slate-200 text-slate-400' : formData.type === 'income' ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}`}>{saving ? 'Posting...' : 'Post to Ledger'}</button>
                         </div>
                     </div>
                 </div>
@@ -730,18 +744,25 @@
                     companyName: (data.companyName || data.description || '').trim(),
                     receiptData: data.receiptData || null
                 };
+                let attachmentWarning = '';
                 if (data.receiptFile?.data) {
-                    const safeName = `${Date.now()}-${(data.receiptFile.name || 'receipt').replace(/[^a-z0-9._-]+/gi, '_')}`;
-                    const storagePath = `artifacts/${APP_ID}/receipts/${user.uid}/${safeName}`;
-                    const receiptRef = storage.ref().child(storagePath);
-                    await receiptRef.putString(data.receiptFile.data, 'data_url');
-                    const downloadURL = await receiptRef.getDownloadURL();
-                    normalizedData.receiptFile = {
-                        name: data.receiptFile.name || safeName,
-                        type: data.receiptFile.type || inferReceiptType(data.receiptFile),
-                        storagePath,
-                        downloadURL
-                    };
+                    try {
+                        const safeName = `${Date.now()}-${(data.receiptFile.name || 'receipt').replace(/[^a-z0-9._-]+/gi, '_')}`;
+                        const storagePath = `artifacts/${APP_ID}/receipts/${user.uid}/${safeName}`;
+                        const receiptRef = storage.ref().child(storagePath);
+                        await receiptRef.putString(data.receiptFile.data, 'data_url');
+                        const downloadURL = await receiptRef.getDownloadURL();
+                        normalizedData.receiptFile = {
+                            name: data.receiptFile.name || safeName,
+                            type: data.receiptFile.type || inferReceiptType(data.receiptFile),
+                            storagePath,
+                            downloadURL
+                        };
+                    } catch (uploadError) {
+                        console.error('Receipt upload failed, saving ledger entry without stored file.', uploadError);
+                        normalizedData.receiptFile = null;
+                        attachmentWarning = 'The ledger entry was posted, but the scanned file could not be uploaded. A preview image was kept when available.';
+                    }
                 } else {
                     normalizedData.receiptFile = data.receiptFile || null;
                 }
@@ -762,6 +783,7 @@
                     }
                 }
                 setIsAddModalOpen(false);
+                if (attachmentWarning) alert(attachmentWarning);
             };
 
             const deleteRecord = async (id, type) => {
@@ -888,9 +910,12 @@
                     {receiptToView && (
                         <div className="fixed inset-0 bg-slate-900/98 z-[100] flex items-center justify-center p-8 backdrop-blur-md" onClick={() => setReceiptToView(null)}>
                             <div className="max-w-full max-h-full w-full h-full flex items-center justify-center">
-                                {inferReceiptType(receiptToView).includes('pdf')
-                                    ? <embed title="Receipt PDF" src={receiptToView.data} type="application/pdf" className="w-full h-full rounded-[2rem] bg-white" />
-                                    : <img src={receiptToView.data} className="max-w-full max-h-full rounded-[2rem] shadow-2xl border-4 border-white/10" alt="Receipt" />}
+                                {(() => {
+                                    const receiptSrc = receiptToView.downloadURL || receiptToView.data;
+                                    return inferReceiptType(receiptToView).includes('pdf')
+                                        ? <embed title="Receipt PDF" src={receiptSrc} type="application/pdf" className="w-full h-full rounded-[2rem] bg-white" />
+                                        : <img src={receiptSrc} className="max-w-full max-h-full rounded-[2rem] shadow-2xl border-4 border-white/10" alt="Receipt" />;
+                                })()}
                             </div>
                             <button className="absolute top-10 right-10 p-4 bg-white/10 text-white rounded-full"><X size={32}/></button>
                         </div>
