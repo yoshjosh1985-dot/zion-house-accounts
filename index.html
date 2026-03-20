@@ -427,25 +427,24 @@
                         </div>
                     </div>
 
-                    {category === 'Utilities' && (
-                        <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-[2rem] p-6 md:p-8 shadow-xl">
+                    <div className={`rounded-[2rem] p-6 md:p-8 shadow-xl ${category === 'Utilities' ? 'bg-gradient-to-br from-slate-900 to-slate-800 text-white' : 'bg-gradient-to-br from-amber-500 to-orange-500 text-white'}`}>
                             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
                                 <div>
-                                    <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400">Utility Statement Balance</p>
+                                    <p className={`text-[9px] font-black uppercase tracking-[0.3em] ${category === 'Utilities' ? 'text-slate-400' : 'text-amber-100/80'}`}>{category === 'Utilities' ? 'Utility Statement Balance' : 'Grocery Statement Balance'}</p>
                                     <h3 className="text-2xl md:text-4xl font-black tracking-tighter mt-2">${statementSummary.balance.toFixed(2)}</h3>
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-2">Income minus posted utility payments</p>
+                                    <p className={`text-[10px] font-black uppercase tracking-widest mt-2 ${category === 'Utilities' ? 'text-slate-400' : 'text-amber-100/80'}`}>Income minus posted {category === 'Utilities' ? 'utility' : 'grocery'} payments</p>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full md:w-auto">
-                                    <div className="bg-white/5 rounded-2xl p-4">
-                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Utility Income</p>
+                                    <div className="bg-white/10 rounded-2xl p-4">
+                                        <p className={`text-[9px] font-black uppercase tracking-widest ${category === 'Utilities' ? 'text-slate-400' : 'text-amber-100/80'}`}>{category === 'Utilities' ? 'Utility Income' : 'Grocery Income'}</p>
                                         <p className="text-xl font-black text-emerald-300 mt-2">+${statementSummary.income.toFixed(2)}</p>
                                     </div>
-                                    <div className="bg-white/5 rounded-2xl p-4">
-                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Utility Payments</p>
+                                    <div className="bg-white/10 rounded-2xl p-4">
+                                        <p className={`text-[9px] font-black uppercase tracking-widest ${category === 'Utilities' ? 'text-slate-400' : 'text-amber-100/80'}`}>{category === 'Utilities' ? 'Utility Payments' : 'Grocery Payments'}</p>
                                         <p className="text-xl font-black text-rose-300 mt-2">-${statementSummary.payments.toFixed(2)}</p>
                                     </div>
-                                    <div className="bg-white/5 rounded-2xl p-4">
-                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Net Balance</p>
+                                    <div className="bg-white/10 rounded-2xl p-4">
+                                        <p className={`text-[9px] font-black uppercase tracking-widest ${category === 'Utilities' ? 'text-slate-400' : 'text-amber-100/80'}`}>Net Balance</p>
                                         <p className={`text-xl font-black mt-2 ${statementSummary.balance >= 0 ? 'text-emerald-300' : 'text-amber-300'}`}>${statementSummary.balance.toFixed(2)}</p>
                                     </div>
                                 </div>
@@ -453,8 +452,8 @@
                             {statementSummary.topShops.length > 0 && (
                                 <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                                     {statementSummary.topShops.map(([shop, total]) => (
-                                        <div key={shop} className="bg-white/5 rounded-2xl p-4">
-                                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Shop Total</p>
+                                        <div key={shop} className="bg-white/10 rounded-2xl p-4">
+                                            <p className={`text-[9px] font-black uppercase tracking-widest ${category === 'Utilities' ? 'text-slate-500' : 'text-amber-100/70'}`}>Shop Total</p>
                                             <p className="text-sm font-black mt-2">{shop}</p>
                                             <p className="text-lg font-black text-white mt-3">${total.toFixed(2)}</p>
                                         </div>
@@ -462,7 +461,6 @@
                                 </div>
                             )}
                         </div>
-                    )}
 
                     {entries.map(entry => {
                         const dateLabel = formatActivityDate(entry.activityDate);
@@ -806,6 +804,7 @@
             });
             const [options, setOptions] = useState({ food: true, utilities: true, income: true });
             const [groupBy, setGroupBy] = useState('company');
+            const [reportLayout, setReportLayout] = useState('separate');
             const [selectedCompanies, setSelectedCompanies] = useState([]);
             const companyOptions = useMemo(() => [...new Set(transactions.map(tx => (tx.companyName || tx.description || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b)), [transactions]);
 
@@ -818,32 +817,53 @@
                     const companyMatch = selectedCompanies.length === 0 || selectedCompanies.includes(companyName);
                     return d >= start && d <= end && companyMatch && ((t.category === 'Food' && options.food) || (t.category === 'Utilities' && options.utilities));
                 });
-                const filteredInc = options.income ? incomeLogs.filter(i => { const d = new Date(i.date); return d >= start && d <= end; }) : [];
-                const groupedExpenses = filteredTx.reduce((acc, tx) => {
-                    const key = groupBy === 'company' ? (tx.companyName || tx.description || 'Unknown Company') : tx.category;
-                    acc[key] = acc[key] || { total: 0, items: [] };
-                    acc[key].total += parseFloat(tx.amount) || 0;
-                    acc[key].items.push(tx);
-                    return acc;
-                }, {});
-                const categoryTotals = ['Food', 'Utilities'].map(category => {
-                    const expenseTotal = filteredTx.filter(tx => tx.category === category).reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0), 0);
-                    const incomeTotal = filteredInc.filter(inc => inc.category === category).reduce((sum, inc) => sum + (parseFloat(inc.amount) || 0), 0);
-                    return { category, expenseTotal, incomeTotal, balance: incomeTotal - expenseTotal };
-                }).filter(item => item.expenseTotal > 0 || item.incomeTotal > 0);
-                const groupedTotals = Object.entries(groupedExpenses).map(([group, data]) => {
-                    const incomeTotal = filteredInc
-                        .filter(inc => groupBy === 'company'
-                            ? (inc.companyName || inc.description || 'Unknown Company') === group
-                            : inc.category === group)
-                        .reduce((sum, inc) => sum + (parseFloat(inc.amount) || 0), 0);
-                    return { group, records: data.items.length, expenseTotal: data.total, incomeTotal, balance: incomeTotal - data.total };
-                });
+                const filteredInc = options.income ? incomeLogs.filter(i => {
+                    const d = new Date(i.paidInDate || i.date);
+                    return d >= start && d <= end && ((i.category === 'Food' && options.food) || (i.category === 'Utilities' && options.utilities));
+                }) : [];
+                const activeCategories = [
+                    options.food ? { id: 'Food', label: 'Grocery' } : null,
+                    options.utilities ? { id: 'Utilities', label: 'Utility' } : null
+                ].filter(Boolean);
+                const categorySections = activeCategories.map(category => {
+                    const sectionTx = filteredTx.filter(tx => tx.category === category.id);
+                    const sectionInc = filteredInc.filter(inc => inc.category === category.id);
+                    const grouped = sectionTx.reduce((acc, tx) => {
+                        const key = groupBy === 'company' ? (tx.companyName || tx.description || 'Unknown Company') : (category.label);
+                        acc[key] = acc[key] || { total: 0, items: [] };
+                        acc[key].total += parseFloat(tx.amount) || 0;
+                        acc[key].items.push(tx);
+                        return acc;
+                    }, {});
+                    const groupedTotals = Object.entries(grouped).map(([group, data]) => {
+                        const incomeTotal = sectionInc
+                            .filter(inc => groupBy === 'company' ? (inc.companyName || inc.description || 'Unknown Company') === group : true)
+                            .reduce((sum, inc) => sum + (parseFloat(inc.amount) || 0), 0);
+                        return { group, records: data.items.length, expenseTotal: data.total, incomeTotal, balance: incomeTotal - data.total };
+                    });
+                    const incomeTotal = sectionInc.reduce((sum, inc) => sum + (parseFloat(inc.amount) || 0), 0);
+                    const expenseTotal = sectionTx.reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0), 0);
+                    return {
+                        ...category,
+                        transactions: sectionTx,
+                        income: sectionInc,
+                        incomeTotal,
+                        expenseTotal,
+                        balance: incomeTotal - expenseTotal,
+                        groupedTotals
+                    };
+                }).filter(section => section.transactions.length > 0 || section.income.length > 0);
+                const categoryTotals = categorySections.map(section => ({
+                    category: section.label,
+                    expenseTotal: section.expenseTotal,
+                    incomeTotal: section.incomeTotal,
+                    balance: section.balance
+                }));
                 const reportTotals = {
                     income: filteredInc.reduce((sum, inc) => sum + (parseFloat(inc.amount) || 0), 0),
                     expenses: filteredTx.reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0), 0)
                 };
-                const utilityBillStatus = filteredTx.filter(tx => tx.category === 'Utilities' && tx.isSplit && tx.splitData).map(tx => ({
+                const utilityBillStatus = categorySections.flatMap(section => section.id === 'Utilities' ? section.transactions : []).filter(tx => tx.isSplit && tx.splitData).map(tx => ({
                     ...tx,
                     shares: tx.splitData.map((share, index) => {
                         const linkedAmount = getLinkedAmountForShare(filteredInc, tx.id, index);
@@ -863,9 +883,22 @@
                         <div class="rounded-3xl border border-slate-100 p-6"><p class="text-xs font-black uppercase tracking-[0.3em] text-slate-400">Balance</p><p class="text-3xl font-black mt-4 ${reportTotals.income - reportTotals.expenses >= 0 ? 'text-emerald-600' : 'text-amber-600'}">$${(reportTotals.income - reportTotals.expenses).toFixed(2)}</p></div>
                     </section>
                     ${categoryTotals.length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-slate-700 mb-6">Category Totals</h2><table class="w-full text-left"><thead><tr><th>Category</th><th class="text-right">Income</th><th class="text-right">Payments</th><th class="text-right">Balance</th></tr></thead><tbody>${categoryTotals.map(item => `<tr><td class="py-2">${item.category}</td><td class="py-2 text-right text-emerald-600">+$${item.incomeTotal.toFixed(2)}</td><td class="py-2 text-right text-rose-600">-$${item.expenseTotal.toFixed(2)}</td><td class="py-2 text-right">$${item.balance.toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
-                    ${filteredInc.length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-emerald-600 mb-6">Funding Inflow</h2><table class="w-full text-left"><thead><tr><th>Entry Date</th><th>Paid In</th><th>Source</th><th>Category</th><th class="text-right">Amount</th></tr></thead><tbody>${filteredInc.map(i => `<tr><td class="py-2">${i.date}</td><td class="py-2">${i.paidInDate || i.date}</td><td class="py-2">${i.description}</td><td class="py-2">${i.category}</td><td class="py-2 text-right">+$${parseFloat(i.amount || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
-                    ${filteredTx.length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-rose-600 mb-6">Expense Outflow</h2><table class="w-full text-left"><thead><tr><th>Date</th><th>Due Date</th><th>Vendor</th><th>Category</th><th class="text-right">Amount</th></tr></thead><tbody>${filteredTx.map(t => `<tr><td class="py-2">${t.date}</td><td class="py-2">${t.category === 'Utilities' ? (t.dueDate || '-') : '-'}</td><td class="py-2">${t.companyName || t.description}</td><td class="py-2">${t.category}</td><td class="py-2 text-right">-$${parseFloat(t.amount || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
-                    ${groupedTotals.length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-slate-700 mb-6">Report by ${groupBy === 'company' ? 'Company / Shop' : 'Category'}</h2><table class="w-full text-left"><thead><tr><th>Group</th><th>Records</th><th class="text-right">Income</th><th class="text-right">Payments</th><th class="text-right">Balance</th></tr></thead><tbody>${groupedTotals.map(item => `<tr><td class="py-2">${item.group}</td><td class="py-2">${item.records}</td><td class="py-2 text-right text-emerald-600">+$${item.incomeTotal.toFixed(2)}</td><td class="py-2 text-right text-rose-600">-$${item.expenseTotal.toFixed(2)}</td><td class="py-2 text-right">$${item.balance.toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
+                    ${reportLayout === 'combined' ? `
+                        ${filteredInc.length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-emerald-600 mb-6">Funding Inflow</h2><table class="w-full text-left"><thead><tr><th>Entry Date</th><th>Paid In</th><th>Source</th><th>Category</th><th class="text-right">Amount</th></tr></thead><tbody>${filteredInc.map(i => `<tr><td class="py-2">${i.date}</td><td class="py-2">${i.paidInDate || i.date}</td><td class="py-2">${i.description}</td><td class="py-2">${i.category}</td><td class="py-2 text-right">+$${parseFloat(i.amount || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
+                        ${filteredTx.length ? `<section class="mb-10"><h2 class="text-xs font-black uppercase tracking-[0.3em] text-rose-600 mb-6">Expense Outflow</h2><table class="w-full text-left"><thead><tr><th>Date</th><th>Due Date</th><th>Vendor</th><th>Category</th><th class="text-right">Amount</th></tr></thead><tbody>${filteredTx.map(t => `<tr><td class="py-2">${t.date}</td><td class="py-2">${t.category === 'Utilities' ? (t.dueDate || '-') : '-'}</td><td class="py-2">${t.companyName || t.description}</td><td class="py-2">${t.category}</td><td class="py-2 text-right">-$${parseFloat(t.amount || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></section>` : ''}
+                    ` : categorySections.map(section => `
+                        <section class="mb-12">
+                            <div class="mb-6"><h2 class="text-2xl font-black uppercase tracking-tight">${section.label} Section</h2><p class="text-xs uppercase tracking-[0.3em] text-slate-400 mt-2">Income, payments, and balance for the selected period</p></div>
+                            <div class="grid grid-cols-3 gap-4 mb-6">
+                                <div class="rounded-3xl border border-slate-100 p-6"><p class="text-xs font-black uppercase tracking-[0.3em] text-slate-400">${section.label} Income</p><p class="text-3xl font-black text-emerald-600 mt-4">+$${section.incomeTotal.toFixed(2)}</p></div>
+                                <div class="rounded-3xl border border-slate-100 p-6"><p class="text-xs font-black uppercase tracking-[0.3em] text-slate-400">${section.label} Payments</p><p class="text-3xl font-black text-rose-600 mt-4">-$${section.expenseTotal.toFixed(2)}</p></div>
+                                <div class="rounded-3xl border border-slate-100 p-6"><p class="text-xs font-black uppercase tracking-[0.3em] text-slate-400">${section.label} Balance</p><p class="text-3xl font-black mt-4 ${section.balance >= 0 ? 'text-emerald-600' : 'text-amber-600'}">$${section.balance.toFixed(2)}</p></div>
+                            </div>
+                            ${section.income.length ? `<div class="mb-8"><h3 class="text-xs font-black uppercase tracking-[0.3em] text-emerald-600 mb-4">${section.label} Inflow</h3><table class="w-full text-left"><thead><tr><th>Entry Date</th><th>Paid In</th><th>Source</th><th class="text-right">Amount</th></tr></thead><tbody>${section.income.map(i => `<tr><td class="py-2">${i.date}</td><td class="py-2">${i.paidInDate || i.date}</td><td class="py-2">${i.description}</td><td class="py-2 text-right">+$${parseFloat(i.amount || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+                            ${section.transactions.length ? `<div class="mb-8"><h3 class="text-xs font-black uppercase tracking-[0.3em] text-rose-600 mb-4">${section.label} Payments</h3><table class="w-full text-left"><thead><tr><th>Date</th><th>Due Date</th><th>${section.id === 'Utilities' ? 'Utility Company' : 'Shop'}</th><th class="text-right">Amount</th></tr></thead><tbody>${section.transactions.map(t => `<tr><td class="py-2">${t.date}</td><td class="py-2">${section.id === 'Utilities' ? (t.dueDate || '-') : '-'}</td><td class="py-2">${t.companyName || t.description}</td><td class="py-2 text-right">-$${parseFloat(t.amount || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+                            ${section.groupedTotals.length ? `<div><h3 class="text-xs font-black uppercase tracking-[0.3em] text-slate-700 mb-4">${section.label} Totals by ${groupBy === 'company' ? (section.id === 'Utilities' ? 'Utility Company' : 'Shop') : 'Section'}</h3><table class="w-full text-left"><thead><tr><th>Group</th><th>Records</th><th class="text-right">Income</th><th class="text-right">Payments</th><th class="text-right">Balance</th></tr></thead><tbody>${section.groupedTotals.map(item => `<tr><td class="py-2">${item.group}</td><td class="py-2">${item.records}</td><td class="py-2 text-right text-emerald-600">+$${item.incomeTotal.toFixed(2)}</td><td class="py-2 text-right text-rose-600">-$${item.expenseTotal.toFixed(2)}</td><td class="py-2 text-right">$${item.balance.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+                        </section>
+                    `).join('')}
                     ${utilityBillStatus.length ? `<section><h2 class="text-xs font-black uppercase tracking-[0.3em] text-blue-600 mb-6">Utility Bill Split Status</h2>${utilityBillStatus.map(bill => `<div class="border border-slate-100 rounded-3xl p-6 mb-6"><h3 class="text-lg font-black">${bill.description}</h3><p class="text-xs text-slate-400">${bill.date}${bill.dueDate ? ` • Due ${bill.dueDate}` : ''}</p><table class="w-full text-left mt-4"><thead><tr><th>Person</th><th class="text-right">Share</th><th class="text-right">Income Linked</th><th class="text-right">Outstanding</th></tr></thead><tbody>${bill.shares.map(share => `<tr><td class="py-2">${share.name}</td><td class="py-2 text-right">$${share.shareAmount.toFixed(2)}</td><td class="py-2 text-right">$${share.linkedAmount.toFixed(2)}</td><td class="py-2 text-right">$${share.outstanding.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`).join('')}</section>` : ''}
                     <div class="mt-20 no-print flex gap-4"><button onclick="window.print()" class="bg-indigo-600 text-white px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest">Print PDF Now</button><button onclick="window.close()" class="bg-slate-100 text-slate-400 px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest">Close Preview</button></div>
                     </div></body></html>`;
@@ -888,6 +921,7 @@
                             <div className="space-y-2"><label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">From Date</label><input type="date" value={dateRange.start} onChange={e => setDateRange({ ...dateRange, start: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border-none font-bold" /></div>
                             <div className="space-y-2"><label className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">To Date</label><input type="date" value={dateRange.end} onChange={e => setDateRange({ ...dateRange, end: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border-none font-bold" /></div>
                         </div>
+                        <div className="space-y-4"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Report Layout</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><button onClick={() => setReportLayout('separate')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${reportLayout === 'separate' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Separate Sections</button><button onClick={() => setReportLayout('combined')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${reportLayout === 'combined' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>All In One</button></div></div>
                         <div className="space-y-4"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Group Expense Reporting</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><button onClick={() => setGroupBy('company')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${groupBy === 'company' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Company / Shop</button><button onClick={() => setGroupBy('category')} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${groupBy === 'category' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-50 text-slate-400'}`}>Fund Category</button></div></div>
                         <div className="space-y-4"><div className="flex items-center justify-between gap-3"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Filter by Shop / Company</p>{selectedCompanies.length > 0 && <button onClick={() => setSelectedCompanies([])} className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Clear</button>}</div><div className="flex flex-wrap gap-2">{companyOptions.length === 0 ? <span className="text-[10px] font-bold text-slate-400">No saved shop names yet.</span> : companyOptions.map(company => <button key={company} onClick={() => setSelectedCompanies(prev => prev.includes(company) ? prev.filter(item => item !== company) : [...prev, company])} className={`px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${selectedCompanies.includes(company) ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-50 text-slate-400'}`}>{company}</button>)}</div></div>
                         <div className="space-y-4"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-1">Include Sections</p><div className="grid grid-cols-1 sm:grid-cols-3 gap-3">{Object.keys(options).map(key => <button key={key} onClick={() => setOptions({ ...options, [key]: !options[key] })} className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${options[key] ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-50 text-slate-400'}`}>{key}</button>)}</div></div>
