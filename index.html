@@ -248,6 +248,21 @@
             return Math.ceil((base64.length * 3) / 4);
         };
 
+        const formatActivityDate = (value) => {
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return value || 'Unknown Date';
+            return parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+        };
+
+        const getActivityShopLabel = (entry) => entry.companyName || entry.description || entry.payer || 'Unknown';
+        const getActivityPersonLabel = (entry) => entry.type === 'income'
+            ? (entry.payer || 'No payer')
+            : (entry.isSplit && entry.splitData?.length ? entry.splitData.map(split => split.name).join(', ') : 'House');
+        const sanitizeRecordInput = (data) => {
+            const { id, entryType, activityDate, createdAt, creatorId, ...rest } = data || {};
+            return rest;
+        };
+
         const toCsv = (transactions, incomeLogs) => {
             const rows = [
                 ['recordType', 'date', 'paidInDate', 'dueDate', 'category', 'description', 'companyName', 'amount', 'payer', 'isSplit', 'linkedBills'],
@@ -325,131 +340,198 @@
             );
         }
 
-        function TransactionList({ type, transactions, onDelete, setViewReceipt, onTogglePaid, incomeLogs = [] }) {
+        function ActivityFeed({ category, transactions, incomeLogs, onDelete, onEdit, setViewReceipt, onTogglePaid }) {
             const [openSplits, setOpenSplits] = useState({});
-            const filtered = transactions.filter(t => t.category === type).sort((a,b) => new Date(b.date) - new Date(a.date));
-            if (filtered.length === 0) return <div className="text-center mt-20 text-slate-300 font-bold uppercase text-xs">No records found.</div>;
+            const [displayMode, setDisplayMode] = useState('all');
+            const [sortBy, setSortBy] = useState('date');
+            const [sortDirection, setSortDirection] = useState('desc');
+
+            const entries = useMemo(() => {
+                const expenses = transactions
+                    .filter(tx => tx.category === category)
+                    .map(tx => ({ ...tx, entryType: 'expense', activityDate: tx.date }));
+                const income = incomeLogs
+                    .filter(inc => inc.category === category)
+                    .map(inc => ({ ...inc, entryType: 'income', activityDate: inc.paidInDate || inc.date }));
+
+                const merged = [...expenses, ...income].filter(entry => (
+                    displayMode === 'all'
+                    || (displayMode === 'income' && entry.entryType === 'income')
+                    || (displayMode === 'payments' && entry.entryType === 'expense')
+                ));
+
+                const sorted = merged.sort((a, b) => {
+                    if (sortBy === 'shop') {
+                        const shopCompare = getActivityShopLabel(a).localeCompare(getActivityShopLabel(b));
+                        if (shopCompare !== 0) return sortDirection === 'asc' ? shopCompare : -shopCompare;
+                    } else if (sortBy === 'person') {
+                        const personCompare = getActivityPersonLabel(a).localeCompare(getActivityPersonLabel(b));
+                        if (personCompare !== 0) return sortDirection === 'asc' ? personCompare : -personCompare;
+                    }
+                    const dateCompare = new Date(a.activityDate) - new Date(b.activityDate);
+                    return sortDirection === 'asc' ? dateCompare : -dateCompare;
+                });
+
+                return sorted;
+            }, [category, transactions, incomeLogs, displayMode, sortBy, sortDirection]);
+
+            if (entries.length === 0) return <div className="text-center mt-20 text-slate-300 font-bold uppercase text-xs">No records found.</div>;
+
+            let lastDateLabel = '';
 
             return (
                 <div className="space-y-6">
-                    {filtered.map(tx => {
-                        const isOpen = !!openSplits[tx.id];
+                    <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 md:p-6 flex flex-col xl:flex-row gap-4 xl:items-center xl:justify-between">
+                        <div>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Activity Feed Controls</p>
+                            <h3 className="text-lg font-black uppercase tracking-tight text-slate-900">{category === 'Food' ? 'Grocery' : 'Utility'} Ledger</h3>
+                        </div>
+                        <div className="flex flex-col md:flex-row gap-3 md:items-center">
+                            <select value={displayMode} onChange={e => setDisplayMode(e.target.value)} className="bg-slate-50 px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-600 border-none">
+                                <option value="all">All Activity</option>
+                                <option value="income">Income Only</option>
+                                <option value="payments">Payments Only</option>
+                            </select>
+                            <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="bg-slate-50 px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-600 border-none">
+                                <option value="date">Sort by Date</option>
+                                <option value="shop">Sort by Shop</option>
+                                <option value="person">Sort by Input Person</option>
+                            </select>
+                            <button onClick={() => setSortDirection(prev => prev === 'desc' ? 'asc' : 'desc')} className="bg-slate-50 px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-600">
+                                {sortDirection === 'desc' ? 'Newest / Z-A' : 'Oldest / A-Z'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {entries.map(entry => {
+                        const dateLabel = formatActivityDate(entry.activityDate);
+                        const showDateSeparator = dateLabel !== lastDateLabel;
+                        lastDateLabel = dateLabel;
+                        const isIncome = entry.entryType === 'income';
+                        const isOpen = !!openSplits[entry.id];
                         return (
-                            <div key={tx.id} className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm group">
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                                    <div className="flex gap-4 md:gap-6 items-center">
-                                        <div className="p-4 bg-slate-50 rounded-2xl text-slate-200 group-hover:text-indigo-400 transition-colors shrink-0"><ImageIcon size={24}/></div>
-                                        <div>
-                                            <h4 className="font-black text-slate-800 text-lg md:text-xl uppercase tracking-tight">{tx.description}</h4>
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{tx.date}{tx.category === 'Utilities' && tx.dueDate ? ` • Due ${tx.dueDate}` : ''}</p>
+                            <React.Fragment key={`${entry.entryType}-${entry.id}`}>
+                                {showDateSeparator && (
+                                    <div className="sticky top-0 z-10">
+                                        <div className="inline-flex items-center gap-3 px-4 py-2 bg-slate-900 text-white rounded-full text-[10px] font-black uppercase tracking-[0.3em] shadow-lg">
+                                            <span>{dateLabel}</span>
                                         </div>
                                     </div>
-                                    <div className="flex items-center justify-between sm:justify-end gap-6">
-                                        <span className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">-${parseFloat(tx.amount || 0).toFixed(2)}</span>
-                                        <button onClick={() => onDelete(tx.id, 'expense')} className="p-2 text-slate-200 hover:text-rose-500 rounded-xl transition-colors"><Trash2 size={24}/></button>
-                                    </div>
-                                </div>
-
-                                {tx.isSplit && tx.splitData?.length > 0 && (
-                                    <div className="mt-6 pt-6 border-t border-slate-50">
-                                        <button onClick={() => setOpenSplits(prev => ({ ...prev, [tx.id]: !prev[tx.id] }))} className="w-full flex items-center justify-between bg-slate-50 rounded-2xl px-5 py-4 text-left">
+                                )}
+                                <div className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm group">
+                                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                                        <div className="flex gap-4 md:gap-6 items-center">
+                                            <div className={`p-4 rounded-2xl shrink-0 ${isIncome ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-200 group-hover:text-indigo-400'} transition-colors`}>
+                                                {isIncome ? <ArrowUpCircle size={24}/> : <ImageIcon size={24}/>}
+                                            </div>
                                             <div>
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bill Split Section</p>
-                                                <p className="text-sm font-black text-slate-800">{tx.splitData.length} share(s)</p>
-                                            </div>
-                                            {isOpen ? <ChevronUp size={18} className="text-slate-500" /> : <ChevronDown size={18} className="text-slate-500" />}
-                                        </button>
-
-                                        {isOpen && (
-                                            <div className="mt-4 space-y-4">
-                                                <div className="flex flex-wrap gap-3">
-                                                    {tx.splitData.map((p, idx) => (
-                                                        <button key={idx} onClick={() => onTogglePaid(tx.id, idx)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[10px] font-black transition-all ${p.paid ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
-                                                            {p.paid ? <CheckCircle size={14}/> : <Circle size={14}/>} {p.name.toUpperCase()}: ${parseFloat(p.amount || 0).toFixed(2)}
-                                                        </button>
-                                                    ))}
+                                                <h4 className="font-black text-slate-800 text-lg md:text-xl uppercase tracking-tight">{entry.description}</h4>
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
+                                                    {entry.activityDate}
+                                                    {!isIncome && entry.category === 'Utilities' && entry.dueDate ? ` • Due ${entry.dueDate}` : ''}
+                                                    {isIncome ? ` • Paid in ${entry.paidInDate || entry.date}` : ''}
+                                                </p>
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${isIncome ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>{isIncome ? 'Income' : 'Payment'}</span>
+                                                    <span className="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-indigo-50 text-indigo-600">{getActivityShopLabel(entry)}</span>
+                                                    <span className="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-slate-100 text-slate-500">{getActivityPersonLabel(entry)}</span>
                                                 </div>
-                                                {tx.category === 'Utilities' && (
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                        {tx.splitData.map((p, idx) => {
-                                                            const linkedAmount = getLinkedAmountForShare(incomeLogs, tx.id, idx);
-                                                            const unpaidAmount = Math.max((parseFloat(p.amount) || 0) - linkedAmount, 0);
-                                                            return (
-                                                                <div key={`${tx.id}-${idx}`} className="bg-slate-50 rounded-2xl p-4">
-                                                                    <div className="flex items-center justify-between gap-3">
-                                                                        <div>
-                                                                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Bill Split</p>
-                                                                            <p className="text-sm font-black text-slate-900">{p.name}</p>
-                                                                        </div>
-                                                                        <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${unpaidAmount <= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>{unpaidAmount <= 0 ? 'Paid Off' : 'Unpaid'}</div>
-                                                                    </div>
-                                                                    <div className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Share</span><span>${(parseFloat(p.amount) || 0).toFixed(2)}</span></div>
-                                                                    <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Linked Income</span><span className="text-emerald-600">${linkedAmount.toFixed(2)}</span></div>
-                                                                    <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Outstanding</span><span className={unpaidAmount > 0 ? 'text-rose-500' : 'text-emerald-600'}>${unpaidAmount.toFixed(2)}</span></div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
+                                                {isIncome && entry.linkedBills?.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{entry.linkedBills.map((link, idx) => <span key={`${entry.id}-${idx}`} className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest">{link.personName}: {link.billDescription} · ${parseFloat(link.amount || 0).toFixed(2)}</span>)}</div>}
                                             </div>
-                                        )}
+                                        </div>
+                                        <div className="flex items-center justify-between sm:justify-end gap-3 md:gap-6">
+                                            <span className={`text-2xl md:text-3xl font-black tracking-tighter ${isIncome ? 'text-emerald-600' : 'text-slate-900'}`}>{isIncome ? '+' : '-'}${parseFloat(entry.amount || 0).toFixed(2)}</span>
+                                            <button onClick={() => onEdit(entry, entry.entryType)} className="p-2 text-slate-300 hover:text-indigo-500 rounded-xl transition-colors" aria-label="Edit entry">✎</button>
+                                            <button onClick={() => onDelete(entry.id, entry.entryType)} className="p-2 text-slate-200 hover:text-rose-500 rounded-xl transition-colors"><Trash2 size={24}/></button>
+                                        </div>
                                     </div>
-                                )}
 
-                                {(tx.receiptData || tx.receiptFile?.data || tx.receiptFile?.downloadURL) && (
-                                    <div className="mt-6 flex flex-wrap gap-3">
-                                        <button onClick={() => {
-                                            const receipt = tx.receiptFile || { data: tx.receiptData, type: 'image/jpeg', name: `${tx.description || 'receipt'}.jpg` };
-                                            setViewReceipt({ ...receipt, type: inferReceiptType(receipt) });
-                                        }} className="flex items-center gap-2 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:underline"><ImageIcon size={14}/> View Receipt</button>
-                                        {(tx.receiptFile?.data || tx.receiptFile?.downloadURL) && (
-                                            <button onClick={() => downloadDataUrl(tx.receiptFile.downloadURL || tx.receiptFile.data, tx.receiptFile.name || 'receipt')} className="flex items-center gap-2 text-emerald-600 text-[10px] font-black uppercase tracking-widest hover:underline"><Download size={14}/> Download Saved File</button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
+                                    {!isIncome && entry.isSplit && entry.splitData?.length > 0 && (
+                                        <div className="mt-6 pt-6 border-t border-slate-50">
+                                            <button onClick={() => setOpenSplits(prev => ({ ...prev, [entry.id]: !prev[entry.id] }))} className="w-full flex items-center justify-between bg-slate-50 rounded-2xl px-5 py-4 text-left">
+                                                <div>
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bill Split Section</p>
+                                                    <p className="text-sm font-black text-slate-800">{entry.splitData.length} share(s)</p>
+                                                </div>
+                                                {isOpen ? <ChevronUp size={18} className="text-slate-500" /> : <ChevronDown size={18} className="text-slate-500" />}
+                                            </button>
+
+                                            {isOpen && (
+                                                <div className="mt-4 space-y-4">
+                                                    <div className="flex flex-wrap gap-3">
+                                                        {entry.splitData.map((p, idx) => (
+                                                            <button key={idx} onClick={() => onTogglePaid(entry.id, idx)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[10px] font-black transition-all ${p.paid ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
+                                                                {p.paid ? <CheckCircle size={14}/> : <Circle size={14}/>} {p.name.toUpperCase()}: ${parseFloat(p.amount || 0).toFixed(2)}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    {entry.category === 'Utilities' && (
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            {entry.splitData.map((p, idx) => {
+                                                                const linkedAmount = getLinkedAmountForShare(incomeLogs, entry.id, idx);
+                                                                const unpaidAmount = Math.max((parseFloat(p.amount) || 0) - linkedAmount, 0);
+                                                                return (
+                                                                    <div key={`${entry.id}-${idx}`} className="bg-slate-50 rounded-2xl p-4">
+                                                                        <div className="flex items-center justify-between gap-3">
+                                                                            <div>
+                                                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Bill Split</p>
+                                                                                <p className="text-sm font-black text-slate-900">{p.name}</p>
+                                                                            </div>
+                                                                            <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${unpaidAmount <= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>{unpaidAmount <= 0 ? 'Paid Off' : 'Unpaid'}</div>
+                                                                        </div>
+                                                                        <div className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Share</span><span>${(parseFloat(p.amount) || 0).toFixed(2)}</span></div>
+                                                                        <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Linked Income</span><span className="text-emerald-600">${linkedAmount.toFixed(2)}</span></div>
+                                                                        <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400 flex justify-between"><span>Outstanding</span><span className={unpaidAmount > 0 ? 'text-rose-500' : 'text-emerald-600'}>${unpaidAmount.toFixed(2)}</span></div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {!isIncome && (entry.receiptData || entry.receiptFile?.data || entry.receiptFile?.downloadURL) && (
+                                        <div className="mt-6 flex flex-wrap gap-3">
+                                            <button onClick={() => {
+                                                const receipt = entry.receiptFile || { data: entry.receiptData, type: 'image/jpeg', name: `${entry.description || 'receipt'}.jpg` };
+                                                setViewReceipt({ ...receipt, type: inferReceiptType(receipt) });
+                                            }} className="flex items-center gap-2 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:underline"><ImageIcon size={14}/> View Receipt</button>
+                                            {(entry.receiptFile?.data || entry.receiptFile?.downloadURL) && (
+                                                <button onClick={() => downloadDataUrl(entry.receiptFile.downloadURL || entry.receiptFile.data, entry.receiptFile.name || 'receipt')} className="flex items-center gap-2 text-emerald-600 text-[10px] font-black uppercase tracking-widest hover:underline"><Download size={14}/> Download Saved File</button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </React.Fragment>
                         );
                     })}
                 </div>
             );
         }
 
-        function IncomeListView({ incomeLogs, onDelete }) {
-            const sorted = [...incomeLogs].sort((a,b) => new Date(b.date) - new Date(a.date));
-            if(sorted.length === 0) return <div className="text-center mt-20 text-slate-300 font-bold uppercase text-xs">No income records found.</div>;
-            return (
-                <div className="space-y-6">
-                    {sorted.map(inc => (
-                        <div key={inc.id} className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                            <div className="flex gap-4 md:gap-6 items-center">
-                                <div className="p-4 rounded-2xl bg-emerald-50 text-emerald-600 shrink-0"><ArrowUpCircle size={24}/></div>
-                                <div>
-                                    <h4 className="font-black text-slate-800 text-lg md:text-xl uppercase tracking-tight">{inc.description}</h4>
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{inc.date} • Paid in {inc.paidInDate || inc.date} • Funded to <span className="text-indigo-600">{inc.category}</span></p>
-                                    {inc.payer && <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mt-2">Payer: <span className="text-slate-500">{inc.payer}</span></p>}
-                                    {inc.linkedBills?.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{inc.linkedBills.map((link, idx) => <span key={`${inc.id}-${idx}`} className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest">{link.personName}: {link.billDescription} · ${parseFloat(link.amount || 0).toFixed(2)}</span>)}</div>}
-                                </div>
-                            </div>
-                            <div className="flex items-center justify-between sm:justify-end gap-10">
-                                <span className="text-2xl md:text-3xl font-black text-emerald-600 tracking-tighter">+${parseFloat(inc.amount || 0).toFixed(2)}</span>
-                                <button onClick={() => onDelete(inc.id, 'income')} className="p-2 text-slate-200 hover:text-rose-500 rounded-xl transition-colors"><Trash2 size={24}/></button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            );
-        }
-
-        function AddEntryModal({ onClose, onSave, transactions, incomeLogs }) {
+        function AddEntryModal({ onClose, onSave, transactions, incomeLogs, initialData = null }) {
             const today = new Date().toISOString().split('T')[0];
-            const [formData, setFormData] = useState({
+            const buildDefaultFormData = (source = null) => {
+                const cleanSource = sanitizeRecordInput(source);
+                return ({
                 type: 'expense', amount: '', category: 'Food', description: '', companyName: '', date: today, paidInDate: today, dueDate: today,
                 receiptData: null, receiptFile: null, isSplit: false, payer: '', linkedBills: [],
-                splitData: [{ name: 'Person 1', amount: '', paid: false }, { name: 'Person 2', amount: '', paid: false }]
+                splitData: [{ name: 'Person 1', amount: '', paid: false }, { name: 'Person 2', amount: '', paid: false }],
+                ...cleanSource,
+                linkedBills: cleanSource?.linkedBills || [],
+                splitData: cleanSource?.splitData?.length ? cleanSource.splitData : [{ name: 'Person 1', amount: '', paid: false }, { name: 'Person 2', amount: '', paid: false }]
             });
+            };
+            const [formData, setFormData] = useState(buildDefaultFormData(initialData));
             const [scanning, setScanning] = useState(false);
             const [saving, setSaving] = useState(false);
             const utilityBills = useMemo(() => transactions.filter(tx => tx.category === 'Utilities').sort((a,b) => new Date(b.date) - new Date(a.date)), [transactions]);
+
+            useEffect(() => {
+                setFormData(buildDefaultFormData(initialData));
+            }, [initialData]);
 
             const calculateRemaining = () => {
                 const total = parseFloat(formData.amount) || 0;
@@ -532,13 +614,13 @@
                 <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[200] flex flex-col items-center justify-center p-4 sm:p-6">
                     <div className="bg-white w-full max-w-xl rounded-[2rem] sm:rounded-[3rem] flex flex-col max-h-[90vh] shadow-2xl overflow-hidden">
                         <div className="flex justify-between items-center p-6 sm:p-8 pb-4 shrink-0 border-b border-slate-50">
-                            <h3 className="text-xl sm:text-2xl font-black uppercase tracking-tighter">New Ledger Entry</h3>
+                            <h3 className="text-xl sm:text-2xl font-black uppercase tracking-tighter">{initialData ? 'Edit Ledger Entry' : 'New Ledger Entry'}</h3>
                             <button onClick={onClose} className="p-2 bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-900 rounded-full transition-colors"><X size={20}/></button>
                         </div>
                         <div className="p-6 sm:p-8 pt-6 overflow-y-auto space-y-6 no-scrollbar">
                             <div className="flex bg-slate-50 p-1.5 rounded-2xl shrink-0">
-                                <button onClick={() => setFormData(prev => ({ ...prev, type: 'expense' }))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${formData.type === 'expense' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>Expense</button>
-                                <button onClick={() => setFormData(prev => ({ ...prev, type: 'income' }))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${formData.type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>Fund</button>
+                                <button disabled={!!initialData} onClick={() => setFormData(prev => ({ ...prev, type: 'expense' }))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${formData.type === 'expense' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'} ${initialData ? 'opacity-60 cursor-not-allowed' : ''}`}>Expense</button>
+                                <button disabled={!!initialData} onClick={() => setFormData(prev => ({ ...prev, type: 'income' }))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${formData.type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'} ${initialData ? 'opacity-60 cursor-not-allowed' : ''}`}>Fund</button>
                             </div>
 
                             {formData.type === 'expense' && (
@@ -735,6 +817,7 @@
             const [user, setUser] = useState(null);
             const [currentView, setCurrentView] = useState('dashboard');
             const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+            const [editingRecord, setEditingRecord] = useState(null);
             const [transactions, setTransactions] = useState([]);
             const [incomeLogs, setIncomeLogs] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -765,16 +848,17 @@
 
             const saveRecord = async (data) => {
                 if (!user) return;
-                const shouldUploadReceipt = Boolean(data.receiptFile?.data);
+                const cleanData = sanitizeRecordInput(data);
+                const shouldUploadReceipt = Boolean(cleanData.receiptFile?.data);
                 const normalizedData = {
-                    ...data,
-                    companyName: (data.companyName || data.description || '').trim(),
-                    receiptData: shouldUploadReceipt && estimateDataUrlSize(data.receiptData) > 250000 ? null : (data.receiptData || null),
-                    receiptFile: shouldUploadReceipt ? null : (data.receiptFile || null)
+                    ...cleanData,
+                    companyName: (cleanData.companyName || cleanData.description || '').trim(),
+                    receiptData: shouldUploadReceipt && estimateDataUrlSize(cleanData.receiptData) > 250000 ? null : (cleanData.receiptData || null),
+                    receiptFile: shouldUploadReceipt ? null : (cleanData.receiptFile || null)
                 };
-                if (data.type === 'income') normalizedData.paidInDate = data.paidInDate || data.date;
-                if (data.type === 'expense' && data.category === 'Utilities') normalizedData.dueDate = data.dueDate || data.date;
-                const coll = data.type === 'income' ? 'income_logs' : 'transactions';
+                if (cleanData.type === 'income') normalizedData.paidInDate = cleanData.paidInDate || cleanData.date;
+                if (cleanData.type === 'expense' && cleanData.category === 'Utilities') normalizedData.dueDate = cleanData.dueDate || cleanData.date;
+                const coll = cleanData.type === 'income' ? 'income_logs' : 'transactions';
                 const ref = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection(coll);
                 const docRef = await ref.add({ ...normalizedData, createdAt: new Date().toISOString(), creatorId: user.uid });
                 if (normalizedData.type === 'income' && normalizedData.category === 'Utilities' && normalizedData.linkedBills?.length) {
@@ -792,22 +876,62 @@
                 if (!shouldUploadReceipt) return;
                 (async () => {
                     try {
-                        const safeName = `${Date.now()}-${(data.receiptFile.name || 'receipt').replace(/[^a-z0-9._-]+/gi, '_')}`;
+                        const safeName = `${Date.now()}-${(cleanData.receiptFile.name || 'receipt').replace(/[^a-z0-9._-]+/gi, '_')}`;
                         const storagePath = `artifacts/${APP_ID}/receipts/${user.uid}/${safeName}`;
                         const receiptRef = storage.ref().child(storagePath);
-                        await receiptRef.putString(data.receiptFile.data, 'data_url');
+                        await receiptRef.putString(cleanData.receiptFile.data, 'data_url');
                         const downloadURL = await receiptRef.getDownloadURL();
                         await docRef.update({
                             receiptData: null,
                             receiptFile: {
-                                name: data.receiptFile.name || safeName,
-                                type: data.receiptFile.type || inferReceiptType(data.receiptFile),
+                                name: cleanData.receiptFile.name || safeName,
+                                type: cleanData.receiptFile.type || inferReceiptType(cleanData.receiptFile),
                                 storagePath,
                                 downloadURL
                             }
                         });
                     } catch (uploadError) {
                         console.error('Receipt upload failed after the ledger entry was posted.', uploadError);
+                    }
+                })();
+            };
+
+            const updateRecord = async (data) => {
+                if (!user || !editingRecord) return;
+                const coll = editingRecord.entryType === 'income' ? 'income_logs' : 'transactions';
+                const cleanData = sanitizeRecordInput(data);
+                const shouldUploadReceipt = Boolean(cleanData.receiptFile?.data);
+                const normalizedData = {
+                    ...cleanData,
+                    companyName: (cleanData.companyName || cleanData.description || '').trim(),
+                    receiptData: shouldUploadReceipt && estimateDataUrlSize(cleanData.receiptData) > 250000 ? null : (cleanData.receiptData || null),
+                    receiptFile: shouldUploadReceipt ? null : (cleanData.receiptFile || null)
+                };
+                if (cleanData.type === 'income') normalizedData.paidInDate = cleanData.paidInDate || cleanData.date;
+                if (cleanData.type === 'expense' && cleanData.category === 'Utilities') normalizedData.dueDate = cleanData.dueDate || cleanData.date;
+                const docRef = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection(coll).doc(editingRecord.id);
+                await docRef.update(normalizedData);
+                setEditingRecord(null);
+                setIsAddModalOpen(false);
+                if (!shouldUploadReceipt) return;
+                (async () => {
+                    try {
+                        const safeName = `${Date.now()}-${(cleanData.receiptFile.name || 'receipt').replace(/[^a-z0-9._-]+/gi, '_')}`;
+                        const storagePath = `artifacts/${APP_ID}/receipts/${user.uid}/${safeName}`;
+                        const receiptRef = storage.ref().child(storagePath);
+                        await receiptRef.putString(cleanData.receiptFile.data, 'data_url');
+                        const downloadURL = await receiptRef.getDownloadURL();
+                        await docRef.update({
+                            receiptData: null,
+                            receiptFile: {
+                                name: cleanData.receiptFile.name || safeName,
+                                type: cleanData.receiptFile.type || inferReceiptType(cleanData.receiptFile),
+                                storagePath,
+                                downloadURL
+                            }
+                        });
+                    } catch (uploadError) {
+                        console.error('Receipt upload failed after the ledger entry update was saved.', uploadError);
                     }
                 })();
             };
@@ -896,7 +1020,6 @@
                                 { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
                                 { id: 'groceries', icon: ShoppingCart, label: 'Groceries' },
                                 { id: 'utilities', icon: Zap, label: 'Utilities' },
-                                { id: 'income', icon: ArrowUpCircle, label: 'Vault Income' },
                                 { id: 'reports', icon: Printer, label: 'Audit Reports' },
                             ].map(item => (
                                 <button key={item.id} onClick={() => setCurrentView(item.id)} className={`flex items-center justify-center md:justify-start gap-4 w-full p-4 rounded-2xl transition-all ${currentView === item.id ? 'bg-indigo-600 text-white shadow-2xl shadow-indigo-900/40' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}>
@@ -915,7 +1038,7 @@
                     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                         <header className="h-20 flex items-center justify-between px-6 md:px-12 bg-white border-b border-slate-100 shrink-0">
                             <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">{currentView}</h2>
-                            <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-indigo-600 text-white px-5 md:px-7 py-3.5 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-100"><Plus size={16} /><span className="hidden sm:inline">Post Transaction</span></button>
+                            <button onClick={() => { setEditingRecord(null); setIsAddModalOpen(true); }} className="flex items-center gap-2 bg-indigo-600 text-white px-5 md:px-7 py-3.5 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-100"><Plus size={16} /><span className="hidden sm:inline">Post Transaction</span></button>
                         </header>
                         <main className="flex-1 overflow-y-auto p-6 md:p-12 no-scrollbar">
                             {loading ? (
@@ -923,16 +1046,15 @@
                             ) : (
                                 <>
                                     {currentView === 'dashboard' && <DashboardOverview stats={categoryStats} outstandingBills={outstandingBills} />}
-                                    {currentView === 'groceries' && <TransactionList type="Food" transactions={transactions} incomeLogs={incomeLogs} onDelete={deleteRecord} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
-                                    {currentView === 'utilities' && <TransactionList type="Utilities" transactions={transactions} incomeLogs={incomeLogs} onDelete={deleteRecord} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
-                                    {currentView === 'income' && <IncomeListView incomeLogs={incomeLogs} onDelete={deleteRecord} />}
+                                    {currentView === 'groceries' && <ActivityFeed category="Food" transactions={transactions} incomeLogs={incomeLogs} onDelete={deleteRecord} onEdit={(entry, entryType) => { setEditingRecord({ ...entry, entryType }); setIsAddModalOpen(true); }} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
+                                    {currentView === 'utilities' && <ActivityFeed category="Utilities" transactions={transactions} incomeLogs={incomeLogs} onDelete={deleteRecord} onEdit={(entry, entryType) => { setEditingRecord({ ...entry, entryType }); setIsAddModalOpen(true); }} setViewReceipt={setReceiptToView} onTogglePaid={toggleSplitPaid} />}
                                     {currentView === 'reports' && <ReportView transactions={transactions} incomeLogs={incomeLogs} onExportCsv={exportCsv} onDownloadReceiptsZip={downloadReceiptsZip} />}
                                 </>
                             )}
                         </main>
                     </div>
 
-                    {isAddModalOpen && <AddEntryModal onClose={() => setIsAddModalOpen(false)} onSave={saveRecord} transactions={transactions} incomeLogs={incomeLogs} />}
+                    {isAddModalOpen && <AddEntryModal onClose={() => { setIsAddModalOpen(false); setEditingRecord(null); }} onSave={editingRecord ? updateRecord : saveRecord} transactions={transactions} incomeLogs={incomeLogs} initialData={editingRecord} />}
                     {receiptToView && (
                         <div className="fixed inset-0 bg-slate-900/98 z-[100] flex items-center justify-center p-8 backdrop-blur-md" onClick={() => setReceiptToView(null)}>
                             <div className="max-w-full max-h-full w-full h-full flex items-center justify-center">
